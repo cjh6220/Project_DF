@@ -1,0 +1,195 @@
+using System;
+using UnityEngine;
+using Proto.Data;
+using Proto.Dungeon;
+using Proto.Mining;
+using Proto.Player;
+
+namespace Proto.Core
+{
+    public enum RunPhase { Idle, InDungeon, Result }
+
+    /// <summary>
+    /// 한 번의 던전 입장을 관리한다.
+    ///
+    ///   입장 → 피로도 가득 → 방 이동/전투/채굴 → 피로도 0 또는 HP 0 → 귀환
+    ///   페널티 없음. 획득물 전부 유지. 그래서 "한 번 더"가 쉽게 나온다.
+    /// </summary>
+    public class RunManager : MonoBehaviour
+    {
+        [SerializeField] TuningConfig cfg;
+        [SerializeField] RoomController room;
+        [SerializeField] PlayerController player;
+
+        /// <summary>이번 방에 어느 쪽 벽으로 들어왔는가. 플레이어가 설 자리를 정한다.</summary>
+        Dir _enteredFrom = Dir.None;
+
+        /// <summary>이번 판의 시드. 같은 방에 다시 들어오면 같은 숲이 나오도록 장식에 넘긴다.</summary>
+        int _runSeed;
+
+        /// <summary>
+        /// 원본 에셋의 런타임 사본. 성장 노드 효과를 여기에만 반영한다.
+        /// 에셋을 직접 고치면 플레이를 끝내도 값이 남아 다음 실행이 오염된다.
+        /// </summary>
+        TuningConfig _live;
+
+        public TuningConfig Config => _live != null ? _live : cfg;
+        public Progression Progression { get; } = new();
+        public DungeonMap Map { get; private set; }
+        public Stamina Stamina { get; private set; }
+        public ResourceWallet RunLoot { get; } = new();
+        public ResourceWallet Bank { get; } = new();
+        public RunPhase Phase { get; private set; } = RunPhase.Idle;
+
+        public event Action RunStarted;
+        public event Action<string> RunEnded;      // 종료 사유
+        public event Action MapChanged;
+
+        Health _playerHealth;
+
+        void Awake()
+        {
+            _live = Instantiate(cfg);
+            _live.name = cfg.name + " (Runtime)";
+
+            // 모든 구성 요소가 사본을 보게 한다. 적은 RoomController가 넘겨준다.
+            room.SetConfig(_live);
+            player.SetConfig(_live);
+
+            Stamina = new Stamina(_live);
+            Stamina.Emptied += () => EndRun("탈진");
+
+            _playerHealth = player.GetComponent<Health>();
+            _playerHealth.Died += () => EndRun("쓰러짐");
+
+            room.ExitUsed += OnExitUsed;
+            room.OreMined += OnOreMined;
+            room.EnemyKilled += RewardEnemyKill;
+            room.BossKilled += OnBossKilled;
+        }
+
+        void Start() => StartRun();
+
+        public void StartRun()
+        {
+            StopAllCoroutines();
+            Time.timeScale = 1f;
+            // 이번 판에 적용할 성장을 먼저 계산한다
+            Progression.ApplyTo(cfg, _live);
+
+            _runSeed = UnityEngine.Random.Range(1, int.MaxValue);
+            Map = DungeonGenerator.Generate(_live, _runSeed);
+            RunLoot.Clear();
+            Stamina.Refill();
+            Stamina.Draining = true;
+
+            _playerHealth.Configure(_live.maxHealth);
+            player.ControlEnabled = true;
+
+            Phase = RunPhase.InDungeon;
+            _enteredFrom = Dir.None;   // 던전 입장 — 남쪽에서 들어온 것으로 친다
+            EnterCurrentRoom();
+            RunStarted?.Invoke();
+            MapChanged?.Invoke();
+        }
+
+        void Update()
+        {
+            if (Phase != RunPhase.InDungeon) return;
+            // 던전에 있는 동안 시간에 따라 계속 소모된다
+            Stamina.Tick(Time.deltaTime);
+        }
+
+        void EnterCurrentRoom()
+        {
+            var r = Map.Current;
+            r.Visited = true;
+
+            // 들어온 쪽 벽 앞에 선다. 아래 방에서 올라왔으면 이 방의 아래쪽이다.
+            // 몬스터 배치가 이 자리를 기준으로 결정되므로 반드시 Build보다 먼저 옮긴다.
+            var spawn = room.EntryPointFor(_enteredFrom);
+            var cc = player.GetComponent<CharacterController>();
+            if (cc != null) cc.enabled = false;
+            player.transform.position = spawn;
+            if (cc != null) cc.enabled = true;
+
+            room.Build(r, player.transform, _enteredFrom, _runSeed);
+            MapChanged?.Invoke();
+        }
+
+        void OnExitUsed(Dir d)
+        {
+            if (Phase != RunPhase.InDungeon) return;
+
+            var next = Map.CurrentCell + DungeonMap.Step(d);
+            if (!Map.InBounds(next) || Map.At(next) == null) return;
+
+            // 처음 가는 방에만 진입 비용이 붙는다.
+            // 되돌아가는 길은 시간만 들 뿐 추가 비용이 없어야,
+            // "더 들어갈까 / 돌아나갈까"가 진짜 선택이 된다.
+            if (!Map.At(next).Visited && _live.staminaOnNewRoom > 0f)
+            {
+                Stamina.Spend(_live.staminaOnNewRoom);
+                if (Stamina.Depleted) return;
+            }
+
+            // d 방향으로 나갔으면 새 방에는 그 반대편 벽으로 들어선다
+            _enteredFrom = DungeonMap.Opposite(d);
+            Map.MoveTo(next);
+            EnterCurrentRoom();
+        }
+
+        void OnOreMined(OreNode ore)
+        {
+            RunLoot.Add(ore.ResourceId, ore.Yield);
+        }
+
+        public void RewardEnemyKill(bool elite)
+        {
+            RunLoot.Add(ResourceId.Essence, elite ? 3 : 1);
+            if (elite) RunLoot.Add(ResourceId.Core, 1);
+            RunLoot.Add(ResourceId.Gold, UnityEngine.Random.Range(2, 6));
+        }
+
+        /// <summary>
+        /// 보스 처치 — 보상을 얹고, 세상이 잠깐 느려진 뒤 정산으로 넘어간다.
+        /// 바로 끊으면 쓰러지는 모습을 못 본다.
+        /// </summary>
+        void OnBossKilled()
+        {
+            if (Phase != RunPhase.InDungeon) return;
+            RunLoot.Add(ResourceId.Core, _live.bossRewardCore);
+            RunLoot.Add(ResourceId.Essence, _live.bossRewardEssence);
+            RunLoot.Add(ResourceId.Gold, _live.bossRewardGold);
+            Stamina.Draining = false;
+            if (Proto.Feel.Feel.I != null)
+            {
+                Proto.Feel.Feel.I.SlowMo(0.2f, 1.6f);
+                Proto.Feel.Feel.I.Shake(Vector3.up, 2f);
+            }
+            StartCoroutine(EndAfter(2.6f, "보스 처치"));
+        }
+
+        System.Collections.IEnumerator EndAfter(float realSeconds, string reason)
+        {
+            yield return new WaitForSecondsRealtime(realSeconds);
+            EndRun(reason);
+        }
+
+        void EndRun(string reason)
+        {
+            if (Phase != RunPhase.InDungeon) return;
+
+            Phase = RunPhase.Result;
+            Stamina.Draining = false;
+            player.ControlEnabled = false;
+
+            // 페널티 없음 — 획득물은 전부 유지한다
+            RunLoot.MergeInto(Bank);
+            RunEnded?.Invoke(reason);
+        }
+
+        /// <summary>정산 화면에서 "다시 들어가기"를 누르면 호출한다.</summary>
+        public void Restart() => StartRun();
+    }
+}

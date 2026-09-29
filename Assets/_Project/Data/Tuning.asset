@@ -1,0 +1,61 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 92768afb7536ce140b1c2ff0b3327518, type: 3}
+  m_Name: Tuning
+  m_EditorClassIdentifier: Assembly-CSharp::Proto.Data.TuningConfig
+  maxStamina: 100
+  staminaDrainPerSecond: 1
+  staminaOnNewRoom: 10
+  gridWidth: 7
+  gridHeight: 7
+  minBossDistance: 6
+  branchCount: 5
+  branchMaxLength: 3
+  enemiesPerRoom: {x: 2, y: 4}
+  roomEntryInset: 2
+  enemySpawnSafeRadius: 5
+  enemySpawnSpacing: 3
+  oresOnMainPath: {x: 0, y: 1}
+  oresOnBranch: {x: 2, y: 3}
+  mineDuration: 2.5
+  mineProgressKeptOnHit: 0
+  mineRange: 2.2
+  moveSpeed: 6.5
+  maxHealth: 100
+  attackDamage: 25
+  attackCooldown: 0.38
+  attackRange: 2
+  attackArcDegrees: 110
+  attackHitDelay1: 0.17
+  attackHitDelay2: 0.16
+  enemyHealth: 40
+  enemyMoveSpeed: 1.5
+  enemyDamage: 10
+  enemyAttackCooldown: 1.4
+  enemyWindup: 0.45
+  enemyAttackRange: 1.8
+  championChancePerRoom: 0.35
+  championSecondChance: 0.18
+  explodeRadius: 3.2
+  explodeDamage: 18
+  howlHasteMultiplier: 1.5
+  howlHasteDuration: 6
+  enemyHitStun: 0.22
+  enemyKnockback: 0.4
+  corpseLinger: 2
+  hitStopDuration: 0.06
+  shakeDuration: 0.12
+  shakeAmplitude: 0.22
+  hitFlashDuration: 0.08
+  killHitStopScale: 2.2
+  hitPunch: 0.18
+  hitPunchDuration: 0.16
