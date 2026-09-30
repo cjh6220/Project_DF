@@ -130,6 +130,12 @@ namespace Proto.UI
 
         void Show(string reason)
         {
+            // 포기는 스스로 고른 귀환이라 정산 연출 없이 바로 스킬트리로 넘어간다
+            if (reason == "포기" && tree != null)
+            {
+                Go(() => { Hide(); tree.Open(); });
+                return;
+            }
             _root.gameObject.SetActive(true);
             transform.SetAsLastSibling();
             if (_seq != null) StopCoroutine(_seq);

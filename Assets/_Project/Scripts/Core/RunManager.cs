@@ -189,6 +189,9 @@ namespace Proto.Core
             RunEnded?.Invoke(reason);
         }
 
+        /// <summary>던전 포기 — 페널티 없이 지금까지 얻은 자원을 챙겨 나간다. 정산 없이 바로 스킬트리로 간다.</summary>
+        public void GiveUp() => EndRun("포기");
+
         /// <summary>정산 화면에서 "다시 들어가기"를 누르면 호출한다.</summary>
         public void Restart() => StartRun();
     }

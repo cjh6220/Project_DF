@@ -1,0 +1,168 @@
+        // ───────────────────────────── 미리보기 (테스트용) ─────────────────────────────
+
+        /// <summary>
+        /// 기획서의 전체 노드 중 아직 게임에 없는 것들. 테스트용 미리보기로만 그린다 — 살 수 없다.
+        /// 갈래: E 탐험(위) · M 채굴(오른쪽) · C 전투(왼쪽) · H 고용(아래). 마지막 칸 1 = 핵심 노드.
+        /// </summary>
+        static readonly string[][] PreviewData =
+        {
+            new[] { "E", "절약", "피로도 소모 속도 −5% (I~V)", "explore_thrift", "0" },
+            new[] { "E", "순발력", "이동 반응 속도 증가 (I~III)", "explore_quickness", "0" },
+            new[] { "E", "예감", "인접 방의 유형 표시", "explore_premonition", "0" },
+            new[] { "E", "경로 예측", "보스방까지의 최단 경로를 미니맵에 표시", "explore_path_foresight", "0" },
+            new[] { "E", "지도", "방 배치 전체를 입장 시부터 공개", "explore_full_map", "0" },
+            new[] { "E", "지름길", "클리어한 층의 중간 지점부터 시작 가능", "explore_shortcut", "1" },
+            new[] { "E", "야영", "던전당 1회, 피로도 30% 회복", "explore_camp", "0" },
+            new[] { "E", "귀환석", "언제든 즉시 귀환, 획득물 확정", "explore_return_stone", "0" },
+            new[] { "E", "문 열림", "봉인된 방 진입 비용 감소", "explore_open_doors", "0" },
+            new[] { "E", "질주 (스킬)", "4초간 이동 속도 +60%, 피로도 소모 절반", "skill_sprint", "0" },
+            new[] { "E", "두 번째 바람", "피로도 20% 이하에서 이속 +30%, 소모 −20%", "explore_second_wind", "0" },
+            new[] { "E", "심층 적응", "깊은 방일수록 피로도 소모 감소", "explore_deep_adaptation", "0" },
+            new[] { "E", "광부의 직감", "상급 광맥이 있는 경로 표시", "explore_miners_instinct", "0" },
+
+            new[] { "M", "수확", "채굴 시 자원량 +1 (I~V)", "mine_harvest", "0" },
+            new[] { "M", "정밀", "상급 자원 산출 확률 +5% (I~III)", "mine_precision", "0" },
+            new[] { "M", "집중", "채굴 중 피격 시 진행도 유지 (I~III)", "mine_focus", "0" },
+            new[] { "M", "광맥 감지", "방 안 광맥 위치를 벽 너머로 표시", "mine_vein_sense", "0" },
+            new[] { "M", "감정안", "캐기 전에 정확한 산출량 표시", "mine_appraisal", "0" },
+            new[] { "M", "자기장", "캔 자원이 자동으로 끌려옴", "mine_magnetism", "0" },
+            new[] { "M", "즉시 채굴", "하급 광맥은 시간 없이 즉시 획득", "mine_instant_mining", "0" },
+            new[] { "M", "연쇄 채굴", "인접한 광맥을 동시에 캠", "mine_chain_mining", "0" },
+            new[] { "M", "광맥 파쇄 (스킬)", "광맥 하나를 즉시 캔다, 산출량 −50%", "skill_ore_shatter", "0" },
+            new[] { "M", "이중 수확", "10% 확률로 산출량 2배", "mine_double_harvest", "0" },
+            new[] { "M", "전투 채굴", "전투 중에도 채굴 가능 (속도 절반)", "mine_combat_mining", "1" },
+            new[] { "M", "잔향", "방 클리어 시 남은 광맥 1개 자동 채굴", "mine_echo", "0" },
+            new[] { "M", "심층 광맥", "깊은 방에서 광맥 1개 추가 생성", "mine_deep_vein", "0" },
+
+            new[] { "C", "수련", "스킬 포인트 +1 (I~XX)", "combat_training", "0" },
+            new[] { "C", "치명", "치명타 확률 +3% (I~V)", "combat_critical", "0" },
+            new[] { "C", "속공", "공격 속도 +6% (I~III)", "combat_swiftness", "0" },
+            new[] { "C", "강인함", "최대 HP +10% (I~III)", "combat_toughness", "0" },
+            new[] { "C", "회피", "무적 프레임 +2 (I~III)", "combat_evasion", "0" },
+            new[] { "C", "내려찍기 (스킬)", "전방 원 충격파, 넘어뜨림", "skill_ground_slam", "0" },
+            new[] { "C", "회전베기 (스킬)", "주변 360° 3회 타격", "skill_whirlwind", "0" },
+            new[] { "C", "연속 찌르기 (스킬)", "전방 5연타, 경직 유지", "skill_rapid_thrusts", "0" },
+            new[] { "C", "캔슬", "공격 후딜을 끊을 수 있음", "combat_cancel", "0" },
+            new[] { "C", "선입력", "입력 버퍼 증가 — 커맨드가 덜 씹힘", "combat_input_buffer", "0" },
+            new[] { "C", "공중 콤보", "띄운 적을 공중에서 이어칠 수 있음", "combat_air_combo", "0" },
+            new[] { "C", "슈퍼아머", "강공격 중 경직 면역", "combat_super_armor", "0" },
+            new[] { "C", "검기 날리기 (스킬)", "관통하는 초승달 검기", "skill_sword_wave", "0" },
+            new[] { "C", "발도술 (스킬)", "칼집에서 순간 베기, 그로기 대상 ×2", "skill_iaido", "1" },
+            new[] { "C", "반격 자세 (스킬)", "0.5초 자세, 맞으면 무효 + 반격", "skill_counter_stance", "0" },
+            new[] { "C", "전투 함성 (스킬)", "10초간 공격 속도 +20%", "skill_war_cry", "0" },
+            new[] { "C", "반격", "완벽 회피 직후 공격력 2배", "combat_riposte", "0" },
+            new[] { "C", "처형", "HP 20% 이하 적 즉사", "combat_execute", "0" },
+            new[] { "C", "연쇄", "처치 시 주변 적에게 피해", "combat_chain_strike", "0" },
+            new[] { "C", "흡혈", "처치 시 HP 소량 회복", "combat_life_drain", "0" },
+            new[] { "C", "전리품", "몬스터 자원 획득량 +20%", "combat_spoils", "0" },
+            new[] { "C", "엘리트 사냥", "엘리트 처치 시 핵 확정", "combat_elite_hunter", "0" },
+            new[] { "C", "대지 가르기 (궁극기)", "전방 일직선으로 땅을 가른다", "skill_earth_splitter", "1" },
+            new[] { "C", "섬멸", "방의 마지막 적 처치 시 피로도 소량 회복", "combat_annihilation", "1" },
+            new[] { "C", "무아지경", "노히트 클리어 시 피로도 소모 5초 정지", "combat_trance", "0" },
+
+            new[] { "H", "채광 알바", "지정한 광맥을 대신 캔다", "hire_miner_helper", "0" },
+            new[] { "H", "전투 알바", "따라다니며 몬스터와 싸운다", "hire_fighter_helper", "0" },
+            new[] { "H", "운반 알바", "바닥의 자원을 자동으로 주워 온다", "hire_porter_helper", "0" },
+            new[] { "H", "정찰 알바", "인접 방의 내용을 미리 가져온다", "hire_scout_helper", "0" },
+            new[] { "H", "위생병 알바", "플레이어 HP를 천천히 회복", "hire_medic_helper", "0" },
+            new[] { "H", "고용 인원", "동행 인원 +1 (I~V)", "hire_headcount", "0" },
+            new[] { "H", "숙련", "알바 작업 속도 +15% (I~V)", "hire_expertise", "0" },
+            new[] { "H", "알바 체력", "알바 HP +25% (I~III)", "hire_helper_vitality", "0" },
+            new[] { "H", "급여 협상", "알바 유지 골드 비용 −20% (I~III)", "hire_wage_deal", "0" },
+            new[] { "H", "지시", "알바에게 우선 작업을 지정", "hire_orders", "0" },
+            new[] { "H", "자율", "알바가 스스로 가까운 광맥을 찾아 캔다", "hire_autonomy", "1" },
+            new[] { "H", "교대", "쓰러진 알바가 일정 시간 후 복귀", "hire_shift_swap", "0" },
+            new[] { "H", "팀워크", "알바가 캔 자원 +15%", "hire_teamwork", "0" },
+            new[] { "H", "호위 대형", "알바가 피해 일부를 대신 받음", "hire_escort_formation", "0" },
+            new[] { "H", "작업 감독", "플레이어 전투 중 알바 속도 +30%", "hire_work_supervisor", "0" },
+            new[] { "H", "2교대", "다음 방으로 가도 알바가 이전 방에서 계속 작업", "hire_two_shifts", "1" },
+            new[] { "H", "자동 편성", "입장 시 최적 알바 조합 자동 선택", "hire_auto_roster", "0" },
+            new[] { "H", "길드", "알바 인원 상한 +3", "hire_guild", "0" },
+        };
+
+        static readonly Color ColPreviewRing = new Color(0.30f, 0.32f, 0.42f, 1f);
+        static readonly Color ColPreviewFill = new Color(0.12f, 0.11f, 0.16f, 1f);
+        static readonly Color ColPreviewEdge = new Color(0.28f, 0.27f, 0.36f, 0.8f);
+
+        /// <summary>
+        /// 갈래별로 줄지어 배치한다. 위·아래 갈래는 좌우 2칸, 좌·우 갈래는 위아래 4칸.
+        /// 가운데 축은 실제 노드 자리로 비워 둔다.
+        /// </summary>
+        void BuildPreview()
+        {
+            _preview = UiKit.Rect(_content, "Preview");
+            _preview.SetSiblingIndex(0);   // 실제 노드 아래에 깔린다
+            var edges = UiKit.Rect(_preview, "Edges");
+            var nodes = UiKit.Rect(_preview, "Nodes");
+
+            var count = new Dictionary<string, int>();
+            foreach (var d in PreviewData)
+            {
+                string br = d[0];
+                count.TryGetValue(br, out int i);
+                count[br] = i + 1;
+
+                Vector2 dir, side; float start; float[] slots;
+                switch (br)
+                {
+                    case "E": dir = Vector2.up; side = Vector2.right; start = 150f; slots = new[] { -150f, 150f }; break;
+                    case "H": dir = Vector2.down; side = Vector2.right; start = 150f; slots = new[] { -150f, 150f }; break;
+                    case "M": dir = Vector2.right; side = Vector2.up; start = 340f; slots = new[] { -150f, 150f, -300f, 300f }; break;
+                    default: dir = Vector2.left; side = Vector2.up; start = 340f; slots = new[] { -150f, 150f, -300f, 300f }; break;
+                }
+                int row = i / slots.Length;
+                float along = start + row * 150f;
+                Vector2 pos = dir * along + side * slots[i % slots.Length];
+                Vector2 anchor = dir * (along - 150f);   // 앞 줄의 축 지점에서 뻗는다
+
+                var e = UiKit.Image(edges, "Edge", ColPreviewEdge);
+                Vector2 dv = pos - anchor;
+                UiKit.Place(e.rectTransform, new Vector2(0.5f, 0.5f), (anchor + pos) * 0.5f, new Vector2(dv.magnitude, 4f));
+                e.rectTransform.localRotation = Quaternion.Euler(0f, 0f, Mathf.Atan2(dv.y, dv.x) * Mathf.Rad2Deg);
+
+                bool key = d[4] == "1";
+                var v = MakeCircle(nodes, "Preview_" + d[1], pos, key ? 86f : 66f);
+                v.Preview = true;
+                v.Data = new UpgradeNode { Name = d[1], Effect = d[2], MaxLevel = 1, Keystone = key };
+                v.Icon.text = d[1].Substring(0, 1);
+                SetArt(v, d[3]);
+                v.Ring.color = key ? new Color(0.62f, 0.50f, 0.28f, 1f) : ColPreviewRing;
+                v.Fill.color = ColPreviewFill;
+                v.Art.color = new Color(0.62f, 0.62f, 0.66f, 1f);
+                v.Plate.gameObject.SetActive(true);
+                v.Level.text = "";
+                v.Cost.text = "<color=#8f8aa3>" + d[1] + "</color>";
+
+                var hover = v.Fill.gameObject.AddComponent<TreeNodeHover>();
+                var captured = v;
+                hover.Enter = () => ShowTip(captured);
+                hover.Exit = () => { if (_hover == captured) HideTip(); };
+                hover.Click = () => StartCoroutine(Shake(captured.Root));
+            }
+
+            // 갈래 축 — 줄 사이를 잇는 흐린 선
+            foreach (var kv in count)
+            {
+                Vector2 dir = kv.Key == "E" ? Vector2.up : kv.Key == "H" ? Vector2.down : kv.Key == "M" ? Vector2.right : Vector2.left;
+                int per = (kv.Key == "E" || kv.Key == "H") ? 2 : 4;
+                float start = (kv.Key == "E" || kv.Key == "H") ? 150f : 340f;
+                float end = start + ((kv.Value - 1) / per - 1) * 150f;
+                if (end <= 0f) continue;
+                var e = UiKit.Image(edges, "Spine_" + kv.Key, ColPreviewEdge);
+                UiKit.Place(e.rectTransform, new Vector2(0.5f, 0.5f), dir * end * 0.5f, new Vector2(end, 4f));
+                e.rectTransform.localRotation = Quaternion.Euler(0f, 0f, Mathf.Atan2(dir.y, dir.x) * Mathf.Rad2Deg);
+                e.transform.SetAsFirstSibling();
+            }
+
+            _preview.gameObject.SetActive(false);
+        }
+
+        void TogglePreview()
+        {
+            _previewOn = !_previewOn;
+            _preview.gameObject.SetActive(_previewOn);
+            _previewLabel.text = _previewOn ? "[테스트] 전체 트리 미리보기: 켬" : "[테스트] 전체 트리 미리보기: 끔";
+            StopAllCoroutines();
+            StartCoroutine(Glide(_previewOn ? Vector2.zero : homeOffset, _previewOn ? 0.38f : 1f));
+        }
+

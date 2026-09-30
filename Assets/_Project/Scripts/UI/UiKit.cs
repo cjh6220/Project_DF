@@ -26,6 +26,36 @@ namespace Proto.UI
         /// <summary>안티앨리어싱된 원.</summary>
         public static Sprite Circle => _circle != null ? _circle : (_circle = MakeCircle(128, 0f));
 
+        static Sprite _rsq;
+
+        /// <summary>
+        /// 모서리가 살짝 둥근 사각형. 스킬트리 노드 틀.
+        /// 아이콘 그림이 사각형이라 원으로 자르면 가장자리가 많이 잘린다.
+        /// </summary>
+        public static Sprite RoundedSquare
+        {
+            get
+            {
+                if (_rsq != null) return _rsq;
+                const int N = 128;
+                const float R = 14f;   // 모서리 반지름 (픽셀)
+                var tex = new Texture2D(N, N, TextureFormat.RGBA32, false) { wrapMode = TextureWrapMode.Clamp };
+                for (int y = 0; y < N; y++)
+                for (int x = 0; x < N; x++)
+                {
+                    float px = x + 0.5f, py = y + 0.5f;
+                    // 모서리 원의 중심까지 거리 — 가장자리 1픽셀은 부드럽게
+                    float cx = Mathf.Clamp(px, R, N - R), cy = Mathf.Clamp(py, R, N - R);
+                    float d = Mathf.Sqrt((px - cx) * (px - cx) + (py - cy) * (py - cy));
+                    float a = Mathf.Clamp01(R - d + 0.5f);
+                    tex.SetPixel(x, y, new Color(1f, 1f, 1f, a));
+                }
+                tex.Apply();
+                _rsq = Sprite.Create(tex, new Rect(0, 0, N, N), new Vector2(0.5f, 0.5f), 100f);
+                return _rsq;
+            }
+        }
+
         /// <summary>테두리 링 (두께 약 10%).</summary>
         public static Sprite Ring => _ring != null ? _ring : (_ring = MakeCircle(128, 0.80f));
 
@@ -140,7 +170,13 @@ namespace Proto.UI
             return b;
         }
 
-        public static string Label(ResourceId id) => id switch
+        /// <summary>글자 안에 끼워 넣는 재화 아이콘 (TMP 기본 스프라이트 에셋 "ResourceIcons").</summary>
+        public static string Icon(ResourceId id) => "<sprite name=\"" + id.ToString().ToLowerInvariant() + "\">";
+
+        /// <summary>아이콘 + 이름. 재화를 글자로 보여 주는 곳은 전부 이걸 쓴다.</summary>
+        public static string Label(ResourceId id) => Icon(id) + " " + Name(id);
+
+        public static string Name(ResourceId id) => id switch
         {
             ResourceId.Gold => "골드",
             ResourceId.Ore => "원석",

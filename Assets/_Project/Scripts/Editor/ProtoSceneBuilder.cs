@@ -516,6 +516,9 @@ namespace Proto.EditorTools
             var bossHud = FullScreen(canvasGo.transform, "BossHud").AddComponent<BossHud>();
             Set(bossHud, "run", run);
 
+            var giveUp = FullScreen(canvasGo.transform, "GiveUp").AddComponent<GiveUpMenu>();
+            Set(giveUp, "run", run);
+
             var tree = FullScreen(canvasGo.transform, "SkillTree").AddComponent<SkillTreeView>();
             Set(tree, "run", run);
 

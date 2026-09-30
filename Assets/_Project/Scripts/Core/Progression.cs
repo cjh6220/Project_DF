@@ -25,8 +25,10 @@ namespace Proto.Core
         public Vector2 Pos;
         /// <summary>선행 노드. 비어 있으면 중앙 시작점에 이어진다. 선행 노드를 1레벨 이상 찍어야 열린다.</summary>
         public NodeId[] Requires = new NodeId[0];
-        /// <summary>노드 원 안에 쓰는 한 글자.</summary>
+        /// <summary>노드 원 안에 쓰는 한 글자. 아이콘 그림이 없을 때만 보인다.</summary>
         public string Icon;
+        /// <summary>Resources/Icons 안의 아이콘 파일 이름 (확장자 없이).</summary>
+        public string IconKey;
         /// <summary>게임의 성격을 바꾸는 노드. 크게, 다른 색으로 그린다.</summary>
         public bool Keystone;
         /// <summary>레벨 → 누적 효과 설명. 툴팁의 '현재 → 다음'에 쓴다.</summary>
@@ -61,31 +63,31 @@ namespace Proto.Core
             new UpgradeNode {
                 Id = NodeId.Stamina, Name = "지구력", Effect = "최대 피로도 +20",
                 Cost = ResourceId.Ore, BaseCost = 8, CostStep = 6, MaxLevel = 5,
-                Pos = new Vector2(0f, 150f), Icon = "지",
+                Pos = new Vector2(0f, 150f), Icon = "지", IconKey = "explore_endurance",
                 Total = lv => "최대 피로도 +" + (20 * lv)
             },
             new UpgradeNode {
                 Id = NodeId.Step, Name = "발걸음", Effect = "새 방 진입 비용 -2",
                 Cost = ResourceId.Ore, BaseCost = 12, CostStep = 10, MaxLevel = 4,
-                Pos = new Vector2(0f, 300f), Icon = "발", Requires = new[] { NodeId.Stamina },
+                Pos = new Vector2(0f, 300f), Icon = "발", IconKey = "explore_footsteps", Requires = new[] { NodeId.Stamina },
                 Total = lv => "새 방 진입 비용 -" + (2 * lv)
             },
             new UpgradeNode {
                 Id = NodeId.BossSense, Name = "보스 감지", Effect = "미니맵에 보스방 위치가 표시된다",
                 Cost = ResourceId.Core, BaseCost = 3, CostStep = 0, MaxLevel = 1,
-                Pos = new Vector2(0f, 470f), Icon = "보", Requires = new[] { NodeId.Step }, Keystone = true,
+                Pos = new Vector2(0f, 470f), Icon = "보", IconKey = "explore_boss_sense", Requires = new[] { NodeId.Step }, Keystone = true,
                 Total = lv => lv > 0 ? "보스방 위치 표시" : "보스방 위치 모름"
             },
             new UpgradeNode {
                 Id = NodeId.Pickaxe, Name = "곡괭이", Effect = "채굴 시간 -0.5초",
                 Cost = ResourceId.Crystal, BaseCost = 6, CostStep = 5, MaxLevel = 3,
-                Pos = new Vector2(170f, 0f), Icon = "곡",
+                Pos = new Vector2(170f, 0f), Icon = "곡", IconKey = "mine_pickaxe",
                 Total = lv => "채굴 시간 -" + (0.5f * lv).ToString("0.0") + "초"
             },
             new UpgradeNode {
                 Id = NodeId.Power, Name = "완력", Effect = "공격력 +5",
                 Cost = ResourceId.Essence, BaseCost = 15, CostStep = 12, MaxLevel = 5,
-                Pos = new Vector2(-170f, 0f), Icon = "완",
+                Pos = new Vector2(-170f, 0f), Icon = "완", IconKey = "combat_might",
                 Total = lv => "공격력 +" + (5 * lv)
             }
         };

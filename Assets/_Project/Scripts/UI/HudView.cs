@@ -60,14 +60,6 @@ namespace Proto.UI
             lootText.text = sb.Length == 0 ? "획득물 없음" : sb.ToString();
         }
 
-        static string Label(ResourceId id) => id switch
-        {
-            ResourceId.Gold => "골드",
-            ResourceId.Ore => "원석",
-            ResourceId.Crystal => "결정",
-            ResourceId.Alien => "이질체",
-            ResourceId.Essence => "정수",
-            _ => "핵"
-        };
+        static string Label(ResourceId id) => UiKit.Label(id);
     }
 }
