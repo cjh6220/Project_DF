@@ -1,0 +1,322 @@
+#if UNITY_EDITOR
+using System.Collections.Generic;
+using UnityEditor;
+using UnityEngine;
+using Proto.Data;
+using Proto.Town;
+using Proto.UI;
+
+namespace Proto.EditorTools
+{
+    /// <summary>
+    /// 던전 4종을 만든다. 메뉴: Proto ▸ Build Dungeons (에셋을 만들고 씬의 마을·도리이에 바로 잇는다)
+    ///
+    ///   01 시작의 숲   기존 숲 테마 그대로 — 짐승, 실버백
+    ///   02 폐광       큰 바위로 둘러싼 갱도, 흙바닥, 어두운 주황 안개 — 독충, 철갑 코뿔소
+    ///   03 설산 사찰   눈밭, 침엽수, 석등 — 늑대 떼, 백곰
+    ///   04 마계 균열   마른 나무, 룬석, 묘비, 보랏빛 안개 — 마물, 사자왕
+    ///
+    /// 테마는 숲 테마를 복사한 뒤 바꿀 것만 덮어쓴다. 숫자(겹 수·간격·개수)는 숲에서 맞춰 둔 값을 이어받는다.
+    /// 다시 실행하면 같은 파일을 덮어쓴다 — 인스펙터에서 손으로 바꾼 값도 되돌아가니 주의.
+    /// </summary>
+    public static class DungeonBuilder
+    {
+        const string Data = "Assets/_Project/Data/";
+        const string Dir = Data + "Dungeons/";
+        const string Nature = "Assets/polyperfect/Poly Universal Pack/- Prefabs/Nature/";
+        const string Halloween = "Assets/polyperfect/Poly Universal Pack/- Prefabs/Halloween/";
+        const string Runes = "Assets/polyperfect/Poly Universal Pack/- Prefabs/Primeval/Runes/";
+        const string AnimalDir = "Assets/polyperfect/Low Poly Animated Animals/- Prefabs/Animals/";
+        const string Terrain = "Assets/polyperfect/Low Poly Animated Animals/- Textures/Terrain/";
+
+        [MenuItem("Proto/Build Dungeons")]
+        public static void BuildMenu()
+        {
+            var list = BuildAll();
+            WireScene(list);
+            UnityEditor.SceneManagement.EditorSceneManager.MarkSceneDirty(UnityEngine.SceneManagement.SceneManager.GetActiveScene());
+        }
+
+        public static DungeonDef[] BuildAll()
+        {
+            System.IO.Directory.CreateDirectory(Dir);
+            var forest = AssetDatabase.LoadAssetAtPath<StageTheme>(Data + "Stage1_Forest.asset");
+            if (forest == null) forest = StageThemeBuilder.Build();
+
+            var mine = Mine(forest);
+            var snow = Snow(forest);
+            var rift = Rift(forest);
+
+            var list = new[]
+            {
+                Def("01_Forest", "forest", "시작의 숲", "짐승이 사는 숲",
+                    "마을 뒤편의 오래된 숲. 늑대와 멧돼지가 길을 막고, 가장 깊은 곳에 숲의 주인 실버백이 산다.",
+                    forest, new Color(0.18f, 0.78f, 0.42f), new Color(0.75f, 1f, 0.65f), 1, 1f, 1f, 1f, 1f, 1f),
+                Def("02_Mine", "mine", "폐광", "버려진 갱도 · 독충",
+                    "광부들이 떠난 갱도. 원석이 많이 남아 있지만 독충과 철갑 코뿔소가 자리를 차지했다.",
+                    mine, new Color(0.95f, 0.48f, 0.10f), new Color(1f, 0.82f, 0.45f), 2, 1.8f, 1.4f, 1.8f, 1.4f, 1.6f),
+                Def("03_SnowTemple", "snow", "설산 사찰", "눈 덮인 산사 · 설원의 맹수",
+                    "눈보라 속에 잠든 사찰. 굶주린 늑대 떼와 산사의 수호자 백곰이 침입자를 기다린다.",
+                    snow, new Color(0.28f, 0.62f, 1f), new Color(0.82f, 0.95f, 1f), 3, 3f, 1.9f, 3f, 1.9f, 2.4f),
+                Def("04_Rift", "rift", "마계 균열", "뒤틀린 땅 · 마물",
+                    "하늘이 갈라진 자리. 마기에 물든 짐승이 들끓고, 균열의 군주가 그 너머를 지킨다.",
+                    rift, new Color(0.62f, 0.10f, 0.95f), new Color(1f, 0.45f, 0.80f), 4, 4.8f, 2.6f, 5f, 2.6f, 3.5f),
+            };
+            AssetDatabase.SaveAssets();
+            Debug.Log("[Proto] 던전 4종 생성 — " + string.Join(", ", System.Array.ConvertAll(list, d => d.displayName)));
+            return list;
+        }
+
+        public static DungeonDef[] LoadAll()
+        {
+            var names = new[] { "01_Forest", "02_Mine", "03_SnowTemple", "04_Rift" };
+            var l = new List<DungeonDef>();
+            foreach (var n in names)
+            {
+                var d = AssetDatabase.LoadAssetAtPath<DungeonDef>(Dir + n + ".asset");
+                if (d != null) l.Add(d);
+            }
+            return l.Count > 0 ? l.ToArray() : BuildAll();
+        }
+
+        /// <summary>씬의 마을에 던전 목록·도리이·선택 창을 잇는다. 선택 창이 없으면 만든다.</summary>
+        public static void WireScene(DungeonDef[] list)
+        {
+            var village = Object.FindFirstObjectByType<VillageController>(FindObjectsInactive.Include);
+            if (village == null) { Debug.LogWarning("[Proto] 씬에 VillageController가 없다"); return; }
+            var gate = Object.FindFirstObjectByType<VillageGate>(FindObjectsInactive.Include);
+            var canvas = Object.FindFirstObjectByType<SkillWindowView>(FindObjectsInactive.Include)?.transform.parent;
+            Wire(village, gate, canvas, list);
+        }
+
+        public static void Wire(VillageController village, VillageGate gate, Transform canvas, DungeonDef[] list)
+        {
+            DungeonSelectView view = null;
+            if (canvas != null)
+            {
+                view = canvas.GetComponentInChildren<DungeonSelectView>(true);
+                if (view == null)
+                {
+                    var go = new GameObject("DungeonSelect", typeof(RectTransform));
+                    go.transform.SetParent(canvas, false);
+                    var rt = (RectTransform)go.transform;
+                    rt.anchorMin = Vector2.zero; rt.anchorMax = Vector2.one;
+                    rt.offsetMin = rt.offsetMax = Vector2.zero;
+                    view = go.AddComponent<DungeonSelectView>();
+                }
+                // 화면 전환(아이리스)보다는 아래에 둔다
+                var iris = canvas.Find("IrisTransition");
+                if (iris != null) view.transform.SetSiblingIndex(iris.GetSiblingIndex());
+            }
+
+            var so = new SerializedObject(village);
+            so.FindProperty("select").objectReferenceValue = view;
+            so.FindProperty("gate").objectReferenceValue = gate;
+            var arr = so.FindProperty("dungeons");
+            arr.arraySize = list.Length;
+            for (int i = 0; i < list.Length; i++) arr.GetArrayElementAtIndex(i).objectReferenceValue = list[i];
+            so.ApplyModifiedPropertiesWithoutUndo();
+            EditorUtility.SetDirty(village);
+        }
+
+        // ───────────────────────────── 던전 ─────────────────────────────
+
+        static DungeonDef Def(string file, string id, string name, string sub, string desc, StageTheme theme,
+                              Color main, Color accent, int danger,
+                              float eh, float ed, float bh, float bd, float reward)
+        {
+            string path = Dir + file + ".asset";
+            var d = AssetDatabase.LoadAssetAtPath<DungeonDef>(path);
+            if (d == null) { d = ScriptableObject.CreateInstance<DungeonDef>(); AssetDatabase.CreateAsset(d, path); }
+            d.id = id; d.displayName = name; d.subtitle = sub; d.description = desc; d.theme = theme;
+            d.portalColor = main; d.portalAccent = accent; d.danger = danger;
+            d.enemyHealthMul = eh; d.enemyDamageMul = ed; d.bossHealthMul = bh; d.bossDamageMul = bd;
+            d.rewardMul = reward;
+            EditorUtility.SetDirty(d);
+            return d;
+        }
+
+        // ───────────────────────────── 테마 ─────────────────────────────
+
+        /// <summary>폐광 — 큰 바위가 벽이 되고, 흙바닥에 돌과 나무 버팀목이 흩어져 있다.</summary>
+        static StageTheme Mine(StageTheme src)
+        {
+            var t = Clone(src, "Stage2_Mine");
+            t.stageName = "폐광";
+            t.groundMaterial = Ground("Mine Ground", Terrain + "Ground-dirt_COL_256.png", new Color(0.70f, 0.60f, 0.50f));
+            t.groundColor = new Color(0.36f, 0.29f, 0.22f);
+            t.useFog = true;
+            t.fogColor = new Color(0.30f, 0.22f, 0.16f); t.skyColor = new Color(0.27f, 0.20f, 0.15f);
+            t.fogStart = 24f; t.fogEnd = 44f;
+            t.ambientColor = new Color(0.46f, 0.40f, 0.36f);
+            t.sunColor = new Color(1f, 0.80f, 0.58f);
+
+            t.borderTrees = P(Nature + "Rocks/", "rock-c", "rock-d", "rock-e", "rock-f", "rock-g", "menhir-a", "menhir-c", "menhir-e");
+            t.borderSpacing = 4.6f; t.borderRowGap = 5.5f; t.borderScale = new Vector2(1.1f, 1.9f);
+            t.sideTrees = P(Nature + "Rocks/", "menhir-a", "menhir-b", "menhir-c", "menhir-d", "rock-a", "rock-b");
+            t.sideTreeScale = new Vector2(0.9f, 1.5f); t.sideSpacing = 2.8f;
+            t.borderFill = Join(P(Nature + "Rocks/", "stone-e", "stone-f", "ground-stones-c", "ground-stones-d"),
+                                P(Nature + "Trees/", "tree-pine-dead-a", "tree-spruce-dead-a", "tree-juniper-dead-a"));
+            t.lowBorder = Join(P(Nature + "Rocks/", "stone-c", "stone-d", "stone-e", "ground-stones-a", "ground-stones-b", "ground-stones-c"),
+                               P(Nature + "Trees/", "wood-log-a", "wood-log-b", "wood-log-c", "tree-pine-stump-a", "twig-a", "twig-c"));
+            t.obstacles = Join(P(Nature + "Rocks/", "menhir-flat-a", "menhir-flat-b", "menhir-flat-c", "ground-stones-c", "ground-stones-d"),
+                               P(Nature + "Trees/", "tree-pine-log-pile-a", "tree-spruce-log-pile-a", "tree-oak-log-pile-a", "tree-pine-broken-a"));
+            t.clutter = Join(P(Nature + "Rocks/", "stone-a", "stone-b", "stone-c", "stone-d", "ground-stones-a", "ground-stones-b"),
+                             P(Nature + "Trees/", "twig-a", "twig-b", "twig-c", "twig-d", "wood-log-a", "wood-log-b"));
+            t.clutterCount = new Vector2Int(18, 28);
+
+            t.enemyModels = A("Spider Yellow", "Snake Yellow", "Snake Red", "Boar");
+            t.championModels = A("Bear", "Gorilla Brown");
+            t.bossModel = A("Rhino_Rig")[0]; t.bossScale = 1.7f;
+            t.bossName = "철갑 코뿔소"; t.bossTitle = "폐광의 파쇄자";
+            return Save(t);
+        }
+
+        /// <summary>설산 사찰 — 눈밭과 침엽수, 군데군데 석등과 돌기둥.</summary>
+        static StageTheme Snow(StageTheme src)
+        {
+            var t = Clone(src, "Stage3_SnowTemple");
+            t.stageName = "설산 사찰";
+            t.groundMaterial = Ground("Snow Ground", Terrain + "Snow_COL_256.png", new Color(0.94f, 0.97f, 1f));
+            t.groundColor = new Color(0.88f, 0.92f, 0.98f);
+            t.useFog = true;
+            t.fogColor = new Color(0.80f, 0.86f, 0.94f); t.skyColor = new Color(0.84f, 0.89f, 0.96f);
+            t.fogStart = 22f; t.fogEnd = 46f;
+            t.ambientColor = new Color(0.62f, 0.68f, 0.78f);
+            t.sunColor = new Color(0.95f, 0.97f, 1f);
+
+            t.borderTrees = P(Nature + "Trees/", "tree-spruce-mature-a", "tree-pine-mature-a", "tree-sequoia-mature-a", "tree-cypress-mature-a", "tree-cypress-mature-b");
+            t.sideTrees = P(Nature + "Trees/", "tree-spruce-mature-a", "tree-pine-mature-a", "tree-juniper-mature-a", "tree-birch-mature-a", "tree-spruce-young-a");
+            t.borderFill = Join(P(Nature + "Trees/", "tree-spruce-sapling-a", "tree-pine-sapling-a", "tree-juniper-sapling-a", "tree-spruce-young-a"),
+                                P(Nature + "Rocks/", "stone-e", "stone-f"));
+            t.lowBorder = Join(P(Nature + "Rocks/", "stone-c", "stone-d", "ground-stones-a", "ground-stones-b"),
+                               P(Nature + "Trees/", "tree-spruce-stump-a", "tree-pine-stump-a", "wood-log-a", "wood-log-c"));
+            var temple = Find("lantern-long", "lantern-stone", "lantern-japan", "statue-japan", "pagoda-small");
+            t.obstacles = Join(P(Nature + "Rocks/", "menhir-flat-a", "menhir-flat-b", "menhir-a"),
+                               P(Nature + "Trees/", "tree-spruce-fallen-a", "tree-pine-fallen-a", "tree-spruce-stump-a"), temple);
+            t.clutter = Join(P(Nature + "Rocks/", "stone-a", "stone-b", "stone-c", "ground-stones-a", "ground-stones-b"),
+                             P(Nature + "Trees/", "twig-a", "twig-b", "twig-e", "tree-spruce-branch-a", "tree-pine-branch-a"),
+                             Find("pinecone"));
+            t.clutterCount = new Vector2Int(14, 22);
+
+            t.enemyModels = A("Wolf Grey", "Fox", "Goat", "Wolf Grey");
+            t.championModels = A("Wolf Black", "Tiger");
+            t.bossModel = A("Polar Bear")[0]; t.bossScale = 2.0f;
+            t.bossName = "백곰 설야"; t.bossTitle = "산사의 수호자";
+            return Save(t);
+        }
+
+        /// <summary>마계 균열 — 말라 죽은 나무, 룬석, 묘비, 보랏빛 안개.</summary>
+        static StageTheme Rift(StageTheme src)
+        {
+            var t = Clone(src, "Stage4_Rift");
+            t.stageName = "마계 균열";
+            t.groundMaterial = Ground("Rift Ground", Terrain + "Ground-cracked-dark_COL_256.png", new Color(0.62f, 0.46f, 0.70f));
+            t.groundColor = new Color(0.26f, 0.18f, 0.30f);
+            t.useFog = true;
+            t.fogColor = new Color(0.24f, 0.10f, 0.28f); t.skyColor = new Color(0.26f, 0.11f, 0.30f);
+            t.fogStart = 24f; t.fogEnd = 44f;
+            t.ambientColor = new Color(0.46f, 0.34f, 0.54f);
+            t.sunColor = new Color(1f, 0.62f, 0.90f);
+
+            t.borderTrees = Join(P(Nature + "Trees/", "tree-sequoia-dead-a", "tree-baobab-dead-a", "tree-jungle-dead-a", "tree-mangrove-dead-a", "tree-willow-weeping-dead-a"),
+                                 P(Halloween, "tree-scary-dead"));
+            t.sideTrees = P(Nature + "Trees/", "tree-pine-dead-a", "tree-spruce-dead-a", "tree-poplar-dead-a", "tree-cypress-dead-a", "tree-juniper-dead-a", "tree-beech-dead-a");
+            t.borderFill = Join(P(Nature + "Rocks/", "rock-a", "rock-b", "stone-e"),
+                                P(Halloween, "stump-possesed", "gravestone-old-tower", "gravestone-old-classic-broken"));
+            t.lowBorder = Join(P(Halloween, "gravestone-old-small-a", "gravestone-old-small-b", "gravestone-old-small-c", "mushroom-magical-cluster-a", "mushroom-magical-cluster-b"),
+                               P(Nature + "Rocks/", "stone-c", "stone-d", "ground-stones-a"));
+            t.obstacles = Join(P(Runes, "rune-a", "rune-b", "rune-c", "rune-d", "rune-e", "rune-f", "rune-g", "rune-h", "rune-i"),
+                               P(Halloween, "gravestone-old-classic-cross", "gravestone-old-cross", "coffin-old", "candle-skull-lit"));
+            t.clutter = Join(P(Halloween, "mushroom-magical-champignon-a", "mushroom-magical-champignon-b", "mushroom-magical-amanita-baby", "candle-stick-a-lit"),
+                             P(Nature + "Rocks/", "stone-a", "stone-b", "ground-stones-a", "ground-stones-b"),
+                             P(Nature + "Trees/", "twig-a", "twig-b", "twig-d", "root-nature-single-a", "root-nature-single-b"));
+            t.clutterCount = new Vector2Int(16, 24);
+
+            t.enemyModels = A("Spider Green", "Spider Red", "Snake Red", "Crocodile");
+            t.championModels = A("Gorilla Black", "Tiger");
+            t.bossModel = A("Lion")[0]; t.bossScale = 2.3f;
+            t.bossName = "검은 갈기"; t.bossTitle = "균열의 군주";
+            return Save(t);
+        }
+
+        // ───────────────────────────── 도구 ─────────────────────────────
+
+        static StageTheme Clone(StageTheme src, string name)
+        {
+            string path = Data + name + ".asset";
+            var t = AssetDatabase.LoadAssetAtPath<StageTheme>(path);
+            if (t == null) { t = ScriptableObject.CreateInstance<StageTheme>(); AssetDatabase.CreateAsset(t, path); }
+            EditorUtility.CopySerialized(src, t);
+            t.name = name;
+            return t;
+        }
+
+        static StageTheme Save(StageTheme t)
+        {
+            EditorUtility.SetDirty(t);
+            Debug.Log($"[Proto] {t.stageName} 테마 — 경계 {Len(t.borderTrees)} / 옆 {Len(t.sideTrees)} / 채움 {Len(t.borderFill)} / " +
+                      $"아래 {Len(t.lowBorder)} / 지형물 {Len(t.obstacles)} / 잡초 {Len(t.clutter)} / 몬스터 {Len(t.enemyModels)}·{Len(t.championModels)} / 보스 {(t.bossModel != null ? t.bossModel.name : "없음")}");
+            return t;
+        }
+
+        static int Len(GameObject[] a) => a == null ? 0 : a.Length;
+
+        /// <summary>숲 바닥 머티리얼을 복사해서 텍스처와 색만 바꾼다.</summary>
+        static Material Ground(string name, string texPath, Color tint)
+        {
+            string path = "Assets/_Project/Materials/" + name + ".mat";
+            var src = AssetDatabase.LoadAssetAtPath<Material>("Assets/_Project/Materials/Forest Ground.mat");
+            var m = AssetDatabase.LoadAssetAtPath<Material>(path);
+            if (m == null)
+            {
+                m = src != null ? new Material(src) : new Material(Shader.Find("Universal Render Pipeline/Lit"));
+                AssetDatabase.CreateAsset(m, path);
+            }
+            var tex = AssetDatabase.LoadAssetAtPath<Texture2D>(texPath);
+            if (tex != null) m.SetTexture("_BaseMap", tex);
+            else Debug.LogWarning("[Proto] 바닥 텍스처 없음: " + texPath);
+            m.SetColor("_BaseColor", tint);
+            EditorUtility.SetDirty(m);
+            return m;
+        }
+
+        static GameObject[] P(string folder, params string[] names)
+        {
+            var l = new List<GameObject>();
+            var miss = new List<string>();
+            foreach (var n in names)
+            {
+                var go = AssetDatabase.LoadAssetAtPath<GameObject>(folder + n + ".prefab");
+                if (go != null) l.Add(go); else miss.Add(n);
+            }
+            if (miss.Count > 0) Debug.LogWarning($"[Proto] 프리팹 못 찾음 ({folder}): {string.Join(", ", miss)}");
+            return l.ToArray();
+        }
+
+        /// <summary>폴더를 모르는 프리팹 — 이름이 정확히 같은 것을 프로젝트 전체에서 찾는다. 없으면 조용히 넘어간다.</summary>
+        static GameObject[] Find(params string[] names)
+        {
+            var l = new List<GameObject>();
+            foreach (var n in names)
+                foreach (var g in AssetDatabase.FindAssets(n + " t:Prefab"))
+                {
+                    var p = AssetDatabase.GUIDToAssetPath(g);
+                    if (System.IO.Path.GetFileNameWithoutExtension(p) != n) continue;
+                    var go = AssetDatabase.LoadAssetAtPath<GameObject>(p);
+                    if (go != null) { l.Add(go); break; }
+                }
+            return l.ToArray();
+        }
+
+        static GameObject[] A(params string[] names) => P(AnimalDir, names);
+
+        static GameObject[] Join(params GameObject[][] parts)
+        {
+            var l = new List<GameObject>();
+            foreach (var p in parts) if (p != null) l.AddRange(p);
+            return l.ToArray();
+        }
+    }
+}
+#endif

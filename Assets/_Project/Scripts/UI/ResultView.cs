@@ -13,8 +13,8 @@ namespace Proto.UI
     ///
     ///   1) 화면이 어두워지고 가운데 띠에 사유 문구 ("너무 지쳐서 더 나아갈 수 없습니다")
     ///   2) 문구가 빠지고 정산 — 제목, 탐험한 방, 획득 자원이 한 줄씩 올라가며 숫자가 차오른다
-    ///   3) [스킬트리] [다시 들어가기]
-    ///       스킬트리 → 원형 전환 → 노드 트리 화면
+    ///   3) [마을로] [다시 들어가기]
+    ///       마을로 → 원형 전환 → 마을 (성장·스킬은 마을 NPC에게서)
     ///       다시 들어가기 → 원형 전환 → 바로 다음 판
     ///
     /// 연출 중에 클릭하거나 키를 누르면 끝까지 건너뛴다. 반복 플레이에서 기다리게 하면 안 된다.
@@ -53,12 +53,9 @@ namespace Proto.UI
         {
             run.RunEnded += Show;
             run.RunStarted += Hide;
+            run.VillageEntered += Hide;
 
-            _treeBtn.onClick.AddListener(() =>
-            {
-                if (tree == null) return;
-                Go(() => { Hide(); tree.Open(); });
-            });
+            _treeBtn.onClick.AddListener(() => Go(() => { Hide(); run.ReturnToVillage(); }));
             _againBtn.onClick.AddListener(() => Go(() => { Hide(); run.Restart(); }));
         }
 
@@ -96,6 +93,11 @@ namespace Proto.UI
             // 2단계: 정산
             _panel = UiKit.Place(UiKit.Rect(_root, "Panel"), new Vector2(0.5f, 0.5f), new Vector2(0f, 30f), new Vector2(640f, 640f));
             _panelCg = _panel.gameObject.AddComponent<CanvasGroup>();
+            // 정산 판 — 어두운 바탕에 금장 테두리
+            var resultBg = UiKit.Image(_panel, "Bg", new Color(0.07f, 0.06f, 0.09f, 0.92f));
+            UiKit.Stretch(resultBg.rectTransform);
+            UiKit.Frame((RectTransform)resultBg.transform, 0.5f);
+            resultBg.transform.SetAsFirstSibling();
 
             _title = UiKit.Text(_panel, "Title", "", 52);
             UiKit.Place(_title.rectTransform, new Vector2(0.5f, 1f), new Vector2(0f, -40f), new Vector2(640f, 64f));
@@ -113,12 +115,13 @@ namespace Proto.UI
             var buttons = UiKit.Place(UiKit.Rect(_panel, "Buttons"), new Vector2(0.5f, 0f), new Vector2(0f, 40f), new Vector2(600f, 60f));
             _buttonsCg = buttons.gameObject.AddComponent<CanvasGroup>();
 
-            _treeBtn = UiKit.Button(buttons, "TreeButton", "스킬트리", new Vector2(230f, 54f), 24);
+            _treeBtn = UiKit.Button(buttons, "VillageButton", "마을로", new Vector2(230f, 54f), 24);
             ((RectTransform)_treeBtn.transform).anchoredPosition = new Vector2(-125f, 0f);
             _againBtn = UiKit.Button(buttons, "AgainButton", "다시 들어가기", new Vector2(230f, 54f), 24);
+            UiKit.Style(_againBtn, UiKit.ButtonKind.Primary);
             ((RectTransform)_againBtn.transform).anchoredPosition = new Vector2(125f, 0f);
 
-            // 살 수 있는 노드가 있으면 스킬트리 버튼에 빨간 점
+            // 살 수 있는 노드가 있으면 마을로 버튼에 빨간 점 — 마을의 성장 관리인에게 가 볼 이유
             _badge = UiKit.Image(_treeBtn.transform, "Badge", new Color(0.92f, 0.22f, 0.22f), UiKit.Circle);
             UiKit.Place(_badge.rectTransform, new Vector2(1f, 1f), new Vector2(-4f, -4f), new Vector2(20f, 20f));
             var bang = UiKit.Text(_badge.transform, "Mark", "!", 16);
@@ -130,10 +133,10 @@ namespace Proto.UI
 
         void Show(string reason)
         {
-            // 포기는 스스로 고른 귀환이라 정산 연출 없이 바로 스킬트리로 넘어간다
-            if (reason == "포기" && tree != null)
+            // 포기는 스스로 고른 귀환이라 정산 연출 없이 바로 마을로 넘어간다
+            if (reason == "포기")
             {
-                Go(() => { Hide(); tree.Open(); });
+                Go(() => { Hide(); run.ReturnToVillage(); });
                 return;
             }
             _root.gameObject.SetActive(true);
@@ -150,6 +153,7 @@ namespace Proto.UI
             var kb = Keyboard.current;
             bool pressed = (Mouse.current != null && Mouse.current.leftButton.wasPressedThisFrame)
                         || (kb != null && (kb.spaceKey.wasPressedThisFrame || kb.enterKey.wasPressedThisFrame || kb.escapeKey.wasPressedThisFrame));
+            pressed |= GameInput.Interact.WasPressedThisFrame() || GameInput.Cancel.WasPressedThisFrame();
             if (pressed) _skip = true;
         }
 
@@ -235,6 +239,9 @@ namespace Proto.UI
             _panelCg.interactable = _panelCg.blocksRaycasts = true;
             yield return Tween(0.2f, k => _buttonsCg.alpha = k);
             _buttonsCg.interactable = true;
+            // 패드·방향키로 바로 고를 수 있게 [다시 들어가기]에 커서를 둔다
+            if (UnityEngine.EventSystems.EventSystem.current != null)
+                UnityEngine.EventSystems.EventSystem.current.SetSelectedGameObject(_againBtn.gameObject);
             _seq = null;
         }
 

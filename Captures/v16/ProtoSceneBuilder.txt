@@ -1,0 +1,773 @@
+#if UNITY_EDITOR
+using System.Collections.Generic;
+using UnityEditor;
+using UnityEngine;
+using UnityEngine.UI;
+using TMPro;
+using Proto.Core;
+using Proto.Data;
+using Proto.Dungeon;
+using Proto.Enemy;
+using Proto.Mining;
+using Proto.Player;
+using Proto.UI;
+
+namespace Proto.EditorTools
+{
+    /// <summary>
+    /// 1주차 프로토타입 씬을 통째로 만들어 준다.
+    /// 메뉴: Proto ▸ Build Prototype Scene
+    ///
+    /// 에셋은 하나도 쓰지 않는다. 전부 캡슐과 큐브다.
+    /// 재미가 확인되기 전에 에셋을 사면 그 에셋에 맞춰 설계가 끌려간다.
+    /// </summary>
+    public static class ProtoSceneBuilder
+    {
+        const string TuningPath = "Assets/_Project/Data/Tuning.asset";
+
+        [MenuItem("Proto/Build Prototype Scene")]
+        public static void Build()
+        {
+            var cfg = LoadOrCreateTuning();
+
+            // 이전에 만든 씬을 먼저 치운다.
+            // 안 그러면 RunManager와 Canvas가 두 벌이 되어 입력이 양쪽으로 들어간다.
+            var scene = UnityEngine.SceneManagement.SceneManager.GetActiveScene();
+
+            // 마을은 손으로 배치를 고친다. 씬을 다시 만들어도 기존 마을은 그대로 살려서 옮겨 심는다.
+            // (처음부터 다시 지으려면 VillageWorld를 지우고 이 메뉴를 돌리면 된다)
+            GameObject keptVillage = null;
+            foreach (var old in scene.GetRootGameObjects())
+            {
+                if (old.name != "== PROTOTYPE ==") continue;
+                var vw = old.transform.Find("VillageWorld");
+                if (vw != null && keptVillage == null) { keptVillage = vw.gameObject; vw.SetParent(null, true); }
+                Object.DestroyImmediate(old);
+            }
+
+            var root = new GameObject("== PROTOTYPE ==");
+
+            BuildLighting(root.transform);
+            var arena = BuildArena(root.transform);
+            var player = BuildPlayer(root.transform, cfg);
+            var cam = BuildCamera(root.transform, player.transform);
+            BuildFeel(root.transform, cfg, cam.transform.parent);
+
+            var enemyPrefab = BuildEnemyTemplate(root.transform);
+            var orePrefab = BuildOreTemplate(root.transform);
+            var exitPrefab = BuildExitTemplate(root.transform);
+
+            var roomGo = new GameObject("Room");
+            roomGo.transform.SetParent(root.transform);
+            var room = roomGo.AddComponent<RoomController>();
+            Set(room, "cfg", cfg);
+            Set(room, "contentRoot", arena.transform);
+            Set(room, "enemyPrefab", enemyPrefab);
+            Set(room, "orePrefab", orePrefab);
+            Set(room, "exitPrefab", exitPrefab);
+            Set(room, "decorator", arena.GetComponent<RoomDecorator>());
+            Set(room, "telegraphMaterial", TelegraphMaterial());
+
+            var runGo = new GameObject("RunManager");
+            runGo.transform.SetParent(root.transform);
+            var run = runGo.AddComponent<RunManager>();
+            Set(run, "cfg", cfg);
+            Set(run, "room", room);
+            Set(run, "player", player.GetComponent<PlayerController>());
+
+            var ui = BuildUI(root.transform, run, player.GetComponent<PlayerController>());
+
+            // 마을 — 아레나와 같은 자리에 겹쳐 짓는다. 게임은 여기서 시작한다.
+            var deco = arena.GetComponent<RoomDecorator>();
+            var theme = new SerializedObject(deco).FindProperty("theme").objectReferenceValue as StageTheme;
+            VillageBuilder.Result built;
+            if (keptVillage != null)
+            {
+                keptVillage.transform.SetParent(root.transform, true);
+                keptVillage.SetActive(true);
+                built = new VillageBuilder.Result
+                {
+                    World = keptVillage,
+                    Spawn = keptVillage.transform.Find("Spawn"),
+                    Npcs = keptVillage.GetComponentsInChildren<Proto.Town.VillageNpc>(true),
+                    Gate = keptVillage.GetComponentInChildren<Proto.Town.VillageGate>(true),
+                };
+                Debug.Log("[Proto] 기존 마을 배치를 그대로 썼다 (VillageWorld)");
+            }
+            else built = VillageBuilder.Build(root.transform, theme);
+            var vGo = new GameObject("Village");
+            vGo.transform.SetParent(root.transform);
+            var village = vGo.AddComponent<Proto.Town.VillageController>();
+            Set(village, "run", run);
+            Set(village, "player", player.GetComponent<PlayerController>());
+            Set(village, "world", built.World);
+            Set(village, "spawn", built.Spawn);
+            Set(village, "npcs", built.Npcs);
+            Set(village, "tree", ui.tree);
+            Set(village, "skills", ui.skills);
+            Set(village, "iris", ui.iris);
+            Set(village, "dungeonHud", ui.hud);
+            Set(village, "environment", deco);
+            Set(built.Gate, "village", village);
+            Set(run, "village", village);
+            // 던전 4종 · 선택 창 · 도리이 색
+            DungeonBuilder.Wire(village, built.Gate, ui.tree.transform.parent, DungeonBuilder.LoadAll());
+
+            enemyPrefab.SetActive(false);
+            orePrefab.SetActive(false);
+            exitPrefab.SetActive(false);
+
+            Selection.activeGameObject = root;
+            Debug.Log("[Proto] 프로토타입 씬 생성 완료. Play를 누르세요.\n" +
+                      "이동 방향키 · 공격 X · 스킬 Z · 채굴 C(누르고 있기) · 대화 Space — 패드도 지원\n" +
+                      "가장 먼저 만질 숫자: Tuning.asset 의 staminaDrainPerSecond");
+        }
+
+        static TuningConfig LoadOrCreateTuning()
+        {
+            var cfg = AssetDatabase.LoadAssetAtPath<TuningConfig>(TuningPath);
+            if (cfg != null) return cfg;
+
+            System.IO.Directory.CreateDirectory("Assets/_Project/Data");
+            AssetDatabase.Refresh();
+            cfg = ScriptableObject.CreateInstance<TuningConfig>();
+            AssetDatabase.CreateAsset(cfg, TuningPath);
+            AssetDatabase.SaveAssets();
+            return cfg;
+        }
+
+        static void BuildLighting(Transform parent)
+        {
+            var go = new GameObject("Sun");
+            go.transform.SetParent(parent);
+            go.transform.rotation = Quaternion.Euler(50f, -30f, 0f);
+            var l = go.AddComponent<Light>();
+            l.type = LightType.Directional;
+            l.intensity = 1.1f;
+            l.color = new Color(1f, 0.96f, 0.9f);
+        }
+
+        static GameObject BuildArena(Transform parent)
+        {
+            var arena = new GameObject("Arena");
+            arena.transform.SetParent(parent);
+
+            var floor = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            floor.name = "Floor";
+            floor.transform.SetParent(arena.transform);
+            floor.transform.localScale = new Vector3(20f, 0.5f, 12f);
+            floor.transform.localPosition = new Vector3(0f, -0.25f, 0f);
+            Tint(floor, new Color(0.20f, 0.22f, 0.28f));
+
+            var walls = new[] {
+                CreateWall(arena.transform, new Vector3(0f, 1f, 6.2f), new Vector3(20f, 2f, 0.4f)),
+                CreateWall(arena.transform, new Vector3(0f, 1f, -6.2f), new Vector3(20f, 2f, 0.4f)),
+                CreateWall(arena.transform, new Vector3(10.2f, 1f, 0f), new Vector3(0.4f, 2f, 12f)),
+                CreateWall(arena.transform, new Vector3(-10.2f, 1f, 0f), new Vector3(0.4f, 2f, 12f))
+            };
+
+            // 장식은 별도 루트에 담는다. 방을 옮길 때 이 밑만 비우면 된다.
+            var decorRoot = new GameObject("Decor");
+            decorRoot.transform.SetParent(arena.transform, false);
+
+            var decorator = arena.AddComponent<RoomDecorator>();
+            Set(decorator, "theme", StageThemeBuilder.Build());
+            Set(decorator, "decorRoot", decorRoot.transform);
+            Set(decorator, "ground", floor.GetComponent<Renderer>());
+            var wallRenderers = new Renderer[walls.Length];
+            for (int i = 0; i < walls.Length; i++) wallRenderers[i] = walls[i].GetComponent<Renderer>();
+            Set(decorator, "walls", wallRenderers);
+
+            return arena;
+        }
+
+        static GameObject CreateWall(Transform parent, Vector3 pos, Vector3 scale)
+        {
+            var w = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            w.name = "Wall";
+            w.transform.SetParent(parent);
+            w.transform.localPosition = pos;
+            w.transform.localScale = scale;
+            Tint(w, new Color(0.12f, 0.13f, 0.18f));
+            return w;
+        }
+
+        static GameObject BuildPlayer(Transform parent, TuningConfig cfg)
+        {
+            var go = new GameObject("Player");
+            go.transform.SetParent(parent);
+            go.tag = "Player";
+            go.layer = LayerMask.NameToLayer("Player");   // 몬스터와 몸이 부딪히지 않게 (Player↔Enemy 충돌 끔)
+
+            var cc = go.AddComponent<CharacterController>();
+            cc.height = 1.8f; cc.radius = 0.4f; cc.center = new Vector3(0f, 0.9f, 0f);
+
+            var visual = new GameObject("Visual");
+            visual.transform.SetParent(go.transform);
+            visual.transform.localPosition = Vector3.zero;
+
+            var model = BuildPlayerModel(visual.transform);
+
+            go.AddComponent<Health>();
+            var pc = go.AddComponent<PlayerController>();
+            Set(pc, "cfg", cfg);
+            Set(pc, "visual", visual.transform);
+            SetLayerMask(pc, "enemyMask", ~0);
+
+            if (model != null)
+            {
+                var pa = go.AddComponent<Proto.Player.PlayerAnimator>();
+                Set(pa, "animator", model.GetComponent<Animator>());
+                Set(pa, "model", model.transform);
+            }
+            return go;
+        }
+
+        // 주인공 — 카타나를 든 사무라이. 휴머노이드 리그라 카타나 콤보 모션이 그대로 붙는다.
+        const string PlayerModelPath =
+            "Assets/polyperfect/Low Poly Ultimate Pack/M/- Prefabs_M/People_M/Rigs_M/man-samurai_Rig.prefab";
+
+        /// <summary>
+        /// 캐릭터 모델을 붙인다. 프리팹에 딸려 있는 팩 자체의 이동 스크립트는 떼어낸다.
+        /// NavMeshAgent나 WanderScript가 남아 있으면 우리 PlayerController와 서로 밀어낸다.
+        /// </summary>
+        public static GameObject BuildPlayerModel(Transform parent)
+        {
+            var prefab = AssetDatabase.LoadAssetAtPath<GameObject>(PlayerModelPath);
+            if (prefab == null)
+            {
+                Debug.LogWarning("[Proto] 캐릭터 모델을 못 찾음: " + PlayerModelPath + " — 캡슐로 대체");
+                var capsule = GameObject.CreatePrimitive(PrimitiveType.Capsule);
+                capsule.name = "Body";
+                capsule.transform.SetParent(parent, false);
+                capsule.transform.localPosition = new Vector3(0f, 0.9f, 0f);
+                Object.DestroyImmediate(capsule.GetComponent<Collider>());
+                Tint(capsule, new Color(0.35f, 0.85f, 0.95f));
+                return null;
+            }
+
+            var model = (GameObject)PrefabUtility.InstantiatePrefab(prefab, parent);
+            PrefabUtility.UnpackPrefabInstance(model, PrefabUnpackMode.Completely, InteractionMode.AutomatedAction);
+            model.name = "Model";
+            model.transform.localPosition = Vector3.zero;
+            model.transform.localRotation = Quaternion.Euler(0f, 90f, 0f);   // 오른쪽을 보게
+
+            // 팩이 붙여 둔 것들을 전부 떼어낸다. 우리는 PlayerController로 움직인다.
+            // 여러 번 돌리는 이유: [RequireComponent] 때문에 의존하는 쪽을 먼저 지워야
+            // 지워지는 것들이 있다. CharacterController가 그렇게 살아남았었다.
+            for (int pass = 0; pass < 4; pass++)
+            {
+                foreach (var c in model.GetComponentsInChildren<Component>(true))
+                {
+                    if (c == null) continue;
+                    if (c is Transform || c is Animator || c is Renderer || c is MeshFilter) continue;
+                    Object.DestroyImmediate(c);
+                }
+            }
+
+            var leftovers = new List<string>();
+            foreach (var c in model.GetComponentsInChildren<Component>(true))
+                if (c != null && !(c is Transform || c is Animator || c is Renderer || c is MeshFilter))
+                    leftovers.Add(c.GetType().Name);
+            if (leftovers.Count > 0)
+                Debug.LogWarning("[Proto] 모델에서 못 떼어낸 컴포넌트: " + string.Join(", ", leftovers));
+
+            var anim = model.GetComponent<Animator>();
+            if (anim == null) anim = model.AddComponent<Animator>();
+            anim.runtimeAnimatorController = PlayerAnimatorBuilder.Build();
+            anim.applyRootMotion = false;   // 이동은 CharacterController가 한다
+
+            AttachWeapon(anim);
+            return model;
+        }
+
+        // 콤보 모션 팩에 들어 있던 카타나 — 모션이 이 칼을 쥐고 만들어져서 쥐는 자리가 정확히 맞는다.
+        // 통짜 메시라 KatanaPaint 셰이더가 길이를 따라 손잡이·코등이·날을 나눠 칠한다.
+        const string WeaponPath =
+            "Assets/Animation/Grruzam Powerful Sword Animation(Great Sword, Katana) 1/Modeling/Modeling_Weapon_katana_Blade.FBX";
+        const string WeaponMaterial = "Assets/_Project/Materials/KatanaPaint.mat";
+
+        // 손 본 기준 쥐는 자리. 모션 팩 마네킹이 칼을 쥔 모습을 같은 자세로 맞춰 옮겨 잰 값이다
+        // (Idle 20% 시점, 손에서 칼 뿌리까지의 거리는 키 비율로 맞췄다).
+        static readonly Vector3 GripPos = new Vector3(0.0371f, 0.1088f, 0.0388f);
+        static readonly Quaternion GripRot = new Quaternion(0.28466f, 0.66008f, 0.11790f, -0.68510f);
+
+        /// <summary>
+        /// 무기를 오른손 본에 붙인다.
+        ///
+        /// 손 본에 직접 붙이지 않고 "WeaponSocket" 을 한 겹 끼우는 이유는,
+        /// 쥐는 각도를 눈으로 보면서 맞춰야 하기 때문이다.
+        /// 하이어라키에서 소켓만 집어서 돌리면 되고, 손 본은 건드리지 않는다.
+        /// </summary>
+        public static void AttachWeapon(Animator anim)
+        {
+            var hand = anim.GetBoneTransform(HumanBodyBones.RightHand);
+            var elbow = anim.GetBoneTransform(HumanBodyBones.RightLowerArm);
+            if (hand == null)
+            {
+                Debug.LogWarning("[Proto] 오른손 본을 못 찾아서 무기를 못 붙였다");
+                return;
+            }
+
+            var prefab = AssetDatabase.LoadAssetAtPath<GameObject>(WeaponPath);
+            if (prefab == null)
+            {
+                Debug.LogWarning("[Proto] 무기 프리팹 없음: " + WeaponPath);
+                return;
+            }
+
+            var socket = new GameObject("WeaponSocket");
+            socket.transform.SetParent(hand, false);
+            socket.transform.localPosition = GripPos;
+            socket.transform.localRotation = GripRot;
+
+            var weapon = (GameObject)PrefabUtility.InstantiatePrefab(prefab, socket.transform);
+            PrefabUtility.UnpackPrefabInstance(weapon, PrefabUnpackMode.Completely, InteractionMode.AutomatedAction);
+            weapon.name = "Weapon";
+            weapon.transform.localPosition = Vector3.zero;
+            weapon.transform.localRotation = Quaternion.identity;
+            weapon.transform.localScale = Vector3.one;
+            var mat = AssetDatabase.LoadAssetAtPath<Material>(WeaponMaterial);
+            if (mat != null) foreach (var r in weapon.GetComponentsInChildren<Renderer>(true)) r.sharedMaterial = mat;
+
+            // 무기에 콜라이더가 있으면 플레이어 자신의 공격 판정에 걸린다
+            foreach (var c in weapon.GetComponentsInChildren<Collider>(true)) Object.DestroyImmediate(c);
+            foreach (var r in weapon.GetComponentsInChildren<Rigidbody>(true)) Object.DestroyImmediate(r);
+        }
+
+        static Camera BuildCamera(Transform parent, Transform target)
+        {
+            var rig = new GameObject("CameraRig");
+            rig.transform.SetParent(parent);
+            rig.transform.position = Vector3.zero;
+
+            var camGo = new GameObject("Main Camera");
+            camGo.tag = "MainCamera";
+            camGo.transform.SetParent(rig.transform);
+
+            var cam = camGo.AddComponent<Camera>();
+            cam.orthographic = true;
+            cam.orthographicSize = 6.5f;
+            camGo.transform.position = new Vector3(0f, 9f, -18f);
+            camGo.transform.rotation = Quaternion.Euler(20f, 0f, 0f);
+            cam.backgroundColor = new Color(0.74f, 0.84f, 0.78f);   // 하늘/먼 곳. RoomDecorator가 테마 색으로 덮어쓴다
+            cam.clearFlags = CameraClearFlags.SolidColor;
+
+            camGo.AddComponent<AudioListener>();
+
+            // 후처리(블룸) 켜기 — 포털·불빛처럼 1보다 밝은 색이 번져 보이게
+            var camData = camGo.AddComponent<UnityEngine.Rendering.Universal.UniversalAdditionalCameraData>();
+            camData.renderPostProcessing = true;
+            return cam;
+        }
+
+        static void BuildFeel(Transform parent, TuningConfig cfg, Transform camRoot)
+        {
+            var go = new GameObject("Feel");
+            go.transform.SetParent(parent);
+            var f = go.AddComponent<Proto.Feel.Feel>();
+            Set(f, "cfg", cfg);
+            Set(f, "cameraRoot", camRoot);
+            Proto.EditorTools.FeelAssetBuilder.Assign(f);
+        }
+
+        static GameObject BuildEnemyTemplate(Transform parent)
+        {
+            var go = new GameObject("EnemyTemplate");
+            go.transform.SetParent(parent);
+            go.layer = LayerMask.NameToLayer("Enemy");
+
+            var cc = go.AddComponent<CharacterController>();
+            cc.height = 1.6f; cc.radius = 0.4f; cc.center = new Vector3(0f, 0.8f, 0f);
+
+            var model = BuildEnemyModel(go.transform);
+
+            var hit = go.AddComponent<SphereCollider>();
+            hit.radius = 0.6f;
+            hit.center = new Vector3(0f, 0.8f, 0f);
+            hit.isTrigger = true;
+
+            go.AddComponent<Health>();
+            go.AddComponent<EnemyController>();
+
+            var bar = go.AddComponent<Proto.Enemy.EnemyHealthBar>();
+            Set(bar, "sprite", BarSprite());
+            Set(bar, "material", BarWorldMaterial());
+
+            if (model != null)
+            {
+                var ev = go.AddComponent<Proto.Enemy.EnemyVisual>();
+                Set(ev, "animator", model.GetComponent<Animator>());
+                Set(ev, "model", model.transform);
+            }
+            return go;
+        }
+
+        /// <summary>
+        /// 몬스터 후보. 전부 같은 휴머노이드 리그라 애니메이터 하나를 공유한다.
+        /// 사람이 아닌 실루엣이어야 멀리서도 적으로 읽힌다.
+        /// </summary>
+        static readonly string[] EnemyModelPaths =
+        {
+            "Assets/polyperfect/Low Poly Animated People/- Prefabs/man_skeleton.prefab",
+            "Assets/polyperfect/Low Poly Animated People/- Prefabs/man_zombie.prefab",
+            "Assets/polyperfect/Low Poly Animated People/- Prefabs/woman_zombie.prefab",
+        };
+
+        static GameObject BuildEnemyModel(Transform parent)
+        {
+            GameObject prefab = null;
+            foreach (var path in EnemyModelPaths)
+            {
+                prefab = AssetDatabase.LoadAssetAtPath<GameObject>(path);
+                if (prefab != null) break;
+            }
+            if (prefab == null)
+            {
+                Debug.LogWarning("[Proto] 몬스터 모델을 못 찾음 — 캡슐로 대체");
+                var capsule = GameObject.CreatePrimitive(PrimitiveType.Capsule);
+                capsule.transform.SetParent(parent, false);
+                capsule.transform.localPosition = new Vector3(0f, 0.8f, 0f);
+                capsule.transform.localScale = new Vector3(0.7f, 0.8f, 0.7f);
+                Object.DestroyImmediate(capsule.GetComponent<Collider>());
+                Tint(capsule, new Color(0.85f, 0.35f, 0.35f));
+                return null;
+            }
+
+            var model = (GameObject)PrefabUtility.InstantiatePrefab(prefab, parent);
+            PrefabUtility.UnpackPrefabInstance(model, PrefabUnpackMode.Completely, InteractionMode.AutomatedAction);
+            model.name = "Model";
+            model.transform.localPosition = Vector3.zero;
+            model.transform.localRotation = Quaternion.identity;
+
+            // 팩이 붙여 둔 이동 스크립트는 떼어낸다. EnemyController가 움직인다.
+            for (int pass = 0; pass < 4; pass++)
+                foreach (var c in model.GetComponentsInChildren<Component>(true))
+                {
+                    if (c == null) continue;
+                    if (c is Transform || c is Animator || c is Renderer || c is MeshFilter) continue;
+                    Object.DestroyImmediate(c);
+                }
+
+            var anim = model.GetComponent<Animator>();
+            if (anim == null) anim = model.AddComponent<Animator>();
+            anim.runtimeAnimatorController = EnemyAnimatorBuilder.Build();
+            anim.applyRootMotion = false;
+
+            return model;
+        }
+
+        static GameObject BuildOreTemplate(Transform parent)
+        {
+            var go = new GameObject("OreTemplate");
+            go.transform.SetParent(parent);
+
+            var crystal = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            crystal.transform.SetParent(go.transform);
+            crystal.transform.localPosition = new Vector3(0f, 0.5f, 0f);
+            crystal.transform.localScale = new Vector3(0.6f, 1.0f, 0.6f);
+            crystal.transform.localRotation = Quaternion.Euler(0f, 45f, 12f);
+            Object.DestroyImmediate(crystal.GetComponent<Collider>());
+
+            var ore = go.AddComponent<OreNode>();
+            Set(ore, "visual", crystal.GetComponent<Renderer>());
+            return go;
+        }
+
+        static GameObject BuildExitTemplate(Transform parent)
+        {
+            var go = new GameObject("ExitTemplate");
+            go.transform.SetParent(parent);
+
+            var gate = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            gate.transform.SetParent(go.transform);
+            gate.transform.localPosition = new Vector3(0f, 0.8f, 0f);
+            gate.transform.localScale = new Vector3(1.8f, 1.6f, 0.3f);
+            Object.DestroyImmediate(gate.GetComponent<Collider>());
+
+            var trigger = go.AddComponent<BoxCollider>();
+            trigger.size = new Vector3(2.2f, 2f, 1.2f);
+            trigger.center = new Vector3(0f, 1f, 0f);
+            trigger.isTrigger = true;
+
+            go.AddComponent<ExitGate>();
+            return go;
+        }
+
+        static (SkillTreeView tree, SkillWindowView skills, IrisTransition iris, GameObject hud)
+            BuildUI(Transform parent, RunManager run, PlayerController player)
+        {
+            var canvasGo = new GameObject("Canvas", typeof(Canvas),
+                typeof(CanvasScaler), typeof(GraphicRaycaster));
+            canvasGo.transform.SetParent(parent);
+            var canvas = canvasGo.GetComponent<Canvas>();
+            canvas.renderMode = RenderMode.ScreenSpaceOverlay;
+            var scaler = canvasGo.GetComponent<CanvasScaler>();
+            scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
+            scaler.referenceResolution = new Vector2(1920f, 1080f);
+
+            if (Object.FindFirstObjectByType<UnityEngine.EventSystems.EventSystem>() == null)
+            {
+                var es = new GameObject("EventSystem",
+                    typeof(UnityEngine.EventSystems.EventSystem),
+                    typeof(UnityEngine.InputSystem.UI.InputSystemUIInputModule));
+                es.transform.SetParent(parent);
+            }
+
+            // 던전 전용 HUD는 한 곳에 묶는다. 마을에서는 통째로 숨긴다.
+            var hudRoot = FullScreen(canvasGo.transform, "DungeonHud");
+
+            var staminaFill = Bar(hudRoot.transform, "StaminaBar",
+                new Vector2(40f, -40f), new Vector2(520f, 26f),
+                             new Color(1.00f, 0.84f, 0.10f));   // 피로도 = 노랑
+            var staminaText = Text(hudRoot.transform, "StaminaText",
+                new Vector2(50f, -44f), 18, TextAlignmentOptions.Left);
+
+            var healthFill = Bar(hudRoot.transform, "HealthBar",
+                new Vector2(40f, -76f), new Vector2(380f, 16f),
+                            new Color(0.90f, 0.13f, 0.13f));   // 체력 = 빨강
+
+            var lootText = Text(hudRoot.transform, "LootText",
+                new Vector2(40f, -112f), 20, TextAlignmentOptions.Left);
+
+            var mineRoot = new GameObject("MineBar", typeof(RectTransform));
+            mineRoot.transform.SetParent(hudRoot.transform, false);
+            var mrt = (RectTransform)mineRoot.transform;
+            Anchor(mrt, new Vector2(0.5f, 0.25f), Vector2.zero, new Vector2(320f, 18f));
+            var mineFill = Bar(mineRoot.transform, "MineFill", Vector2.zero,
+                new Vector2(320f, 18f), new Color(0.45f, 0.85f, 1f), true);
+            mineRoot.SetActive(false);
+
+            var mapRoot = new GameObject("Minimap", typeof(RectTransform));
+            mapRoot.transform.SetParent(hudRoot.transform, false);
+            var maprt = (RectTransform)mapRoot.transform;
+            maprt.anchorMin = maprt.anchorMax = new Vector2(1f, 1f);
+            maprt.pivot = new Vector2(1f, 1f);
+            maprt.anchoredPosition = new Vector2(-40f, -40f);
+            maprt.sizeDelta = new Vector2(200f, 200f);
+
+            var cellPrefab = new GameObject("Cell", typeof(RectTransform), typeof(Image));
+            cellPrefab.transform.SetParent(parent, false);
+            var cprt = (RectTransform)cellPrefab.transform;
+            cprt.pivot = Vector2.zero;
+            cprt.anchorMin = Vector2.zero;
+            cprt.anchorMax = Vector2.zero;
+            cellPrefab.SetActive(false);
+
+            var hud = canvasGo.AddComponent<HudView>();
+            Set(hud, "run", run);
+            Set(hud, "player", player);
+            Set(hud, "staminaFill", staminaFill);
+            Set(hud, "healthFill", healthFill);
+            Set(hud, "mineBarRoot", mineRoot);
+            Set(hud, "mineFill", mineFill);
+            Set(hud, "staminaText", staminaText);
+            Set(hud, "lootText", lootText);
+
+            var mini = canvasGo.AddComponent<MinimapView>();
+            Set(mini, "run", run);
+            Set(mini, "grid", maprt);
+            Set(mini, "cellPrefab", cellPrefab);
+
+            // 정산 · 스킬트리 · 화면 전환.
+            // 배치는 각 View가 코드로 만든다 — 여기서는 붙이고 잇기만 한다.
+            var bossHud = FullScreen(canvasGo.transform, "BossHud").AddComponent<BossHud>();
+            Set(bossHud, "run", run);
+
+            var giveUp = FullScreen(canvasGo.transform, "GiveUp").AddComponent<GiveUpMenu>();
+            Set(giveUp, "run", run);
+
+            var tree = FullScreen(canvasGo.transform, "SkillTree").AddComponent<SkillTreeView>();
+            Set(tree, "run", run);
+
+            var skills = FullScreen(canvasGo.transform, "SkillWindow").AddComponent<SkillWindowView>();
+            Set(skills, "run", run);
+
+            var result = FullScreen(canvasGo.transform, "Result").AddComponent<ResultView>();
+            Set(result, "run", run);
+            Set(result, "tree", tree);
+
+            var iris = FullScreen(canvasGo.transform, "IrisTransition").AddComponent<IrisTransition>();
+            Set(iris, "irisMaterial", AssetDatabase.LoadAssetAtPath<Material>("Assets/_Project/Materials/UIIris.mat"));
+            Set(tree, "iris", iris);
+            Set(result, "iris", iris);
+            return (tree, skills, iris, hudRoot);
+        }
+
+        /// <summary>보스 공격 예고 장판. 반투명, 조명·그림자 없음.</summary>
+        public static Material TelegraphMaterial()
+        {
+            const string path = "Assets/_Project/Materials/Telegraph.mat";
+            var m = AssetDatabase.LoadAssetAtPath<Material>(path);
+            if (m == null)
+            {
+                m = new Material(Shader.Find("Universal Render Pipeline/Unlit"));
+                AssetDatabase.CreateAsset(m, path);
+            }
+            m.SetFloat("_Surface", 1f);   // Transparent
+            m.SetFloat("_Blend", 0f);     // Alpha
+            m.SetFloat("_SrcBlend", (float)UnityEngine.Rendering.BlendMode.SrcAlpha);
+            m.SetFloat("_DstBlend", (float)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha);
+            m.SetFloat("_ZWrite", 0f);
+            m.SetFloat("_Cull", 0f);
+            m.EnableKeyword("_SURFACE_TYPE_TRANSPARENT");
+            m.renderQueue = (int)UnityEngine.Rendering.RenderQueue.Transparent;
+            m.SetOverrideTag("RenderType", "Transparent");
+            m.SetColor("_BaseColor", new Color(1f, 0.2f, 0.1f, 0.35f));
+            EditorUtility.SetDirty(m);
+            return m;
+        }
+
+        static GameObject FullScreen(Transform parent, string name)
+        {
+            var go = new GameObject(name, typeof(RectTransform));
+            go.transform.SetParent(parent, false);
+            var rt = (RectTransform)go.transform;
+            rt.anchorMin = Vector2.zero; rt.anchorMax = Vector2.one;
+            rt.offsetMin = rt.offsetMax = Vector2.zero;
+            return go;
+        }
+
+        /// <summary>
+        /// 바에 쓸 흰색 스프라이트. 없으면 만든다.
+        /// Image.type = Filled 는 sprite 가 null 이면 무시되므로 반드시 필요하다.
+        /// </summary>
+        /// <summary>머리 위 체력바용. 조명·안개와 무관하게 늘 같은 색으로 보여야 한다.</summary>
+        public static Material BarWorldMaterial()
+        {
+            const string path = "Assets/_Project/Materials/BarWorld.mat";
+            var m = AssetDatabase.LoadAssetAtPath<Material>(path);
+            if (m != null) return m;
+            if (!System.IO.Directory.Exists("Assets/_Project/Materials")) System.IO.Directory.CreateDirectory("Assets/_Project/Materials");
+            m = new Material(Shader.Find("Universal Render Pipeline/2D/Sprite-Unlit-Default"));
+            AssetDatabase.CreateAsset(m, path);
+            return m;
+        }
+
+        static Sprite BarSprite()
+        {
+            const string dir = "Assets/_Project/Sprites";
+            const string png = dir + "/BarFill.png";
+
+            var spr = AssetDatabase.LoadAssetAtPath<Sprite>(png);
+            if (spr != null) return spr;
+
+            if (!System.IO.Directory.Exists(dir)) System.IO.Directory.CreateDirectory(dir);
+
+            var tex = new Texture2D(8, 8, TextureFormat.RGBA32, false);
+            var px = new Color32[64];
+            for (int i = 0; i < px.Length; i++) px[i] = new Color32(255, 255, 255, 255);
+            tex.SetPixels32(px); tex.Apply();
+            System.IO.File.WriteAllBytes(png, tex.EncodeToPNG());
+            Object.DestroyImmediate(tex);
+
+            AssetDatabase.ImportAsset(png, ImportAssetOptions.ForceUpdate);
+            var imp = (TextureImporter)AssetImporter.GetAtPath(png);
+            imp.textureType = TextureImporterType.Sprite;
+            imp.spriteImportMode = SpriteImportMode.Single;
+            imp.mipmapEnabled = false;
+            imp.SaveAndReimport();
+
+            return AssetDatabase.LoadAssetAtPath<Sprite>(png);
+        }
+
+        static Image Bar(Transform parent, string name, Vector2 pos, Vector2 size,
+                         Color color, bool center = false)
+        {
+            var bg = new GameObject(name, typeof(RectTransform), typeof(Image));
+            bg.transform.SetParent(parent, false);
+            var rt = (RectTransform)bg.transform;
+            Anchor(rt, center ? new Vector2(0.5f, 0.5f) : new Vector2(0f, 1f), pos, size);
+            var bgImg = bg.GetComponent<Image>();
+            bgImg.color = new Color(0f, 0f, 0f, 0.55f);
+            bgImg.sprite = BarSprite();
+
+            var fillGo = new GameObject("Fill", typeof(RectTransform), typeof(Image));
+            fillGo.transform.SetParent(bg.transform, false);
+            var frt = (RectTransform)fillGo.transform;
+            frt.anchorMin = Vector2.zero; frt.anchorMax = Vector2.one;
+            frt.offsetMin = new Vector2(2f, 2f); frt.offsetMax = new Vector2(-2f, -2f);
+
+            var img = fillGo.GetComponent<Image>();
+            img.color = color;
+            // Filled 타입은 스프라이트가 있어야 동작한다.
+            // 스프라이트가 null이면 Unity가 단순 사각형으로 그려서 fillAmount를 무시한다.
+            img.sprite = BarSprite();
+            img.type = Image.Type.Filled;
+            img.fillMethod = Image.FillMethod.Horizontal;
+            img.fillAmount = 1f;
+            return img;
+        }
+
+        static TMP_Text Text(Transform parent, string name, Vector2 pos, float size,
+                             TextAlignmentOptions align, bool center = false)
+        {
+            var go = new GameObject(name, typeof(RectTransform));
+            go.transform.SetParent(parent, false);
+            var rt = (RectTransform)go.transform;
+            Anchor(rt, center ? new Vector2(0.5f, 0.5f) : new Vector2(0f, 1f),
+                   pos, new Vector2(900f, 40f));
+
+            var t = go.AddComponent<TextMeshProUGUI>();
+            t.fontSize = size;
+            t.alignment = align;
+            t.color = Color.white;
+            t.text = "";
+            return t;
+        }
+
+        static void Anchor(RectTransform rt, Vector2 anchor, Vector2 pos, Vector2 size)
+        {
+            rt.anchorMin = rt.anchorMax = anchor;
+            rt.pivot = anchor;
+            rt.anchoredPosition = pos;
+            rt.sizeDelta = size;
+        }
+
+        static void Tint(GameObject go, Color c)
+        {
+            var r = go.GetComponent<Renderer>();
+            if (r == null) return;
+            // 에디터에서 칠한 MaterialPropertyBlock은 플레이 진입 시 사라진다.
+            // 색을 컴포넌트에 들려 보내서 런타임에 다시 칠하게 한다.
+            var t = go.GetComponent<Proto.Feel.Tint>();
+            if (t == null) t = go.AddComponent<Proto.Feel.Tint>();
+            t.Set(c);
+        }
+
+        /// <summary>private [SerializeField] 필드를 에디터에서 채운다.</summary>
+        static void Set(Object target, string field, object value)
+        {
+            var so = new SerializedObject(target);
+            var prop = so.FindProperty(field);
+            if (prop == null)
+            {
+                Debug.LogWarning("[Proto] 필드 없음: " + target.GetType().Name + "." + field);
+                return;
+            }
+
+            if (value is Object[] arr)
+            {
+                prop.arraySize = arr.Length;
+                for (int k = 0; k < arr.Length; k++)
+                    prop.GetArrayElementAtIndex(k).objectReferenceValue = arr[k];
+            }
+            else if (value is Object o) prop.objectReferenceValue = o;
+            else if (value is int i) prop.intValue = i;
+            else if (value is float f) prop.floatValue = f;
+            else if (value is bool b) prop.boolValue = b;
+
+            so.ApplyModifiedPropertiesWithoutUndo();
+        }
+
+        static void SetLayerMask(Object target, string field, int maskValue)
+        {
+            var so = new SerializedObject(target);
+            var prop = so.FindProperty(field);
+            if (prop == null) return;
+            prop.intValue = maskValue;
+            so.ApplyModifiedPropertiesWithoutUndo();
+        }
+    }
+}
+#endif

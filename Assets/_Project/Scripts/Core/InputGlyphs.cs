@@ -1,0 +1,91 @@
+namespace Proto.Core
+{
+    public enum Act { Attack, Skill, Mine, Interact, Cancel, Menu, Chord, Pan, Zoom, Navigate }
+
+    /// <summary>
+    /// 화면에 띄우는 버튼 표시. 지금 쓰는 장치(키보드 / PS / Xbox)에 맞춰 바뀐다.
+    /// 아이콘 대신 글자와 색으로 그린다 — 폰트(맑은 고딕)에 □△○×가 들어 있다.
+    /// 버튼 아이콘 이미지가 생기면 여기만 TMP 스프라이트 태그로 바꾸면 된다.
+    /// </summary>
+    public static class InputGlyphs
+    {
+        // PS 얼굴 버튼 색 / Xbox 얼굴 버튼 색
+        const string PsSquare = "<color=#ff9ad5>□</color>", PsTriangle = "<color=#5fe3b0>△</color>",
+                     PsCircle = "<color=#ff6b6b>○</color>", PsCross = "<color=#86b6ff>×</color>";
+        const string XbX = "<color=#4aa3ff><b>X</b></color>", XbY = "<color=#ffd23a><b>Y</b></color>",
+                     XbB = "<color=#ff5a5a><b>B</b></color>", XbA = "<color=#6ad35a><b>A</b></color>";
+
+        static string Key(string k) => "<color=#ffd45a>" + k + "</color>";
+
+        public static string Of(Act a)
+        {
+            switch (GameInput.Scheme)
+            {
+                case InputScheme.PlayStation:
+                    switch (a)
+                    {
+                        case Act.Attack: return PsSquare;
+                        case Act.Skill: return PsTriangle;
+                        case Act.Mine: case Act.Interact: return PsCross;
+                        case Act.Cancel: return PsCircle;
+                        case Act.Menu: return Key("OPTIONS");
+                        case Act.Chord: return Key("R1");
+                        case Act.Pan: return Key("R스틱");
+                        case Act.Zoom: return Key("L2/R2");
+                        default: return Key("십자키");
+                    }
+                case InputScheme.Xbox:
+                    switch (a)
+                    {
+                        case Act.Attack: return XbX;
+                        case Act.Skill: return XbY;
+                        case Act.Mine: case Act.Interact: return XbA;
+                        case Act.Cancel: return XbB;
+                        case Act.Menu: return Key("Menu");
+                        case Act.Chord: return Key("RB");
+                        case Act.Pan: return Key("R스틱");
+                        case Act.Zoom: return Key("LT/RT");
+                        default: return Key("십자키");
+                    }
+                default:
+                    switch (a)
+                    {
+                        case Act.Attack: return Key("X");
+                        case Act.Skill: return Key("Z");
+                        case Act.Mine: return Key("C");
+                        case Act.Interact: return Key("Space");
+                        case Act.Cancel: case Act.Menu: return Key("Esc");
+                        case Act.Chord: return "";
+                        case Act.Pan: return Key("드래그");
+                        case Act.Zoom: return Key("휠");
+                        default: return Key("방향키");
+                    }
+            }
+        }
+
+        /// <summary>퀵슬롯 i번 키. 키보드 A S D F, 패드 R1 + □ △ ○ ×.</summary>
+        public static string Slot(int i)
+        {
+            switch (GameInput.Scheme)
+            {
+                case InputScheme.PlayStation: return new[] { PsSquare, PsTriangle, PsCircle, PsCross }[i];
+                case InputScheme.Xbox: return new[] { XbX, XbY, XbB, XbA }[i];
+                default: return new[] { "A", "S", "D", "F" }[i];
+            }
+        }
+
+        /// <summary>"↓→ Z" 같은 커맨드 표기를 지금 장치의 버튼으로 바꾼다. Z = 스킬, X = 공격.</summary>
+        public static string Command(string cmd)
+        {
+            if (GameInput.Scheme == InputScheme.Keyboard) return cmd;
+            var sb = new System.Text.StringBuilder();
+            foreach (char c in cmd)
+            {
+                if (c == 'Z') sb.Append(Of(Act.Skill));
+                else if (c == 'X') sb.Append(Of(Act.Attack));
+                else sb.Append(c);
+            }
+            return sb.ToString();
+        }
+    }
+}

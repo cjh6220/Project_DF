@@ -1,0 +1,86 @@
+#if UNITY_EDITOR
+using UnityEditor;
+using UnityEngine;
+
+namespace Proto.EditorTools
+{
+    /// <summary>
+    /// 보내 주신 이펙트·UI 그림을 쓸 수 있게 만든다. 메뉴: Proto ▸ Build Hit FX + UI Frame
+    ///
+    ///   Textures/Fx/FxSlashArc · FxImpact · FxIaidoLine → Resources/Fx/*.mat  (더하기 혼합, 블룸이 걸리게 1 넘는 색)
+    ///   Resources/UI/UIFrame (9-슬라이스 테두리) + 부채·매듭 장식 스프라이트
+    /// </summary>
+    public static class FxBuilder
+    {
+        const string Tex = "Assets/_Project/Textures/Fx/";
+        const string Res = "Assets/_Project/Resources/";
+
+        [MenuItem("Proto/Build Hit FX + UI Frame")]
+        public static void Build()
+        {
+            System.IO.Directory.CreateDirectory(Res + "Fx");
+            foreach (var n in new[] { "FxSlashArc", "FxImpact", "FxIaidoLine" })
+            {
+                var t = FxTexture(Tex + n + ".png");
+                if (t == null) { Debug.LogWarning("[Proto] 이펙트 그림 없음: " + n); continue; }
+                FxMaterial(Res + "Fx/" + n + ".mat", t);
+            }
+
+            // 테두리 — 768x512, 모서리 장식이 늘어나지 않게 구석을 크게 잡는다 (왼, 아래, 오른, 위)
+            UiSprite(Res + "UI/UIFrame.png", new Vector4(190f, 180f, 190f, 168f));
+            foreach (var n in new[] { "UIFrameCrestTop", "UIFrameCrestBottom", "UIFrameKnotLeft", "UIFrameKnotRight" })
+                UiSprite(Res + "UI/" + n + ".png", Vector4.zero);
+            AssetDatabase.SaveAssets();
+            Debug.Log("[Proto] 타격 이펙트 재질 · 금장 테두리 준비 완료");
+        }
+
+        static Texture2D FxTexture(string path)
+        {
+            var imp = AssetImporter.GetAtPath(path) as TextureImporter;
+            if (imp == null) return null;
+            imp.textureType = TextureImporterType.Default;
+            imp.wrapMode = TextureWrapMode.Clamp;
+            imp.mipmapEnabled = true;
+            imp.alphaSource = TextureImporterAlphaSource.FromGrayScale;   // 검은 바탕 = 투명
+            imp.SaveAndReimport();
+            return AssetDatabase.LoadAssetAtPath<Texture2D>(path);
+        }
+
+        static void FxMaterial(string path, Texture2D tex)
+        {
+            var m = AssetDatabase.LoadAssetAtPath<Material>(path);
+            if (m == null)
+            {
+                m = new Material(Shader.Find("Universal Render Pipeline/Particles/Unlit"));
+                AssetDatabase.CreateAsset(m, path);
+            }
+            m.SetTexture("_BaseMap", tex);
+            m.SetColor("_BaseColor", new Color(1.6f, 1.7f, 2.0f, 1f));
+            m.SetFloat("_Surface", 1f);
+            m.SetFloat("_Blend", 2f);   // Additive
+            m.SetFloat("_SrcBlend", (float)UnityEngine.Rendering.BlendMode.SrcAlpha);
+            m.SetFloat("_DstBlend", (float)UnityEngine.Rendering.BlendMode.One);
+            m.SetFloat("_ZWrite", 0f);
+            m.SetFloat("_Cull", 0f);    // 좌우로 뒤집어(음수 크기) 쓴다
+            m.EnableKeyword("_SURFACE_TYPE_TRANSPARENT");
+            m.renderQueue = (int)UnityEngine.Rendering.RenderQueue.Transparent + 10;
+            m.SetOverrideTag("RenderType", "Transparent");
+            EditorUtility.SetDirty(m);
+        }
+
+        static void UiSprite(string path, Vector4 border)
+        {
+            var imp = AssetImporter.GetAtPath(path) as TextureImporter;
+            if (imp == null) { Debug.LogWarning("[Proto] UI 그림 없음: " + path); return; }
+            imp.textureType = TextureImporterType.Sprite;
+            imp.spriteImportMode = SpriteImportMode.Single;
+            imp.alphaIsTransparency = true;
+            imp.mipmapEnabled = false;
+            imp.wrapMode = TextureWrapMode.Clamp;
+            imp.spriteBorder = border;
+            imp.spritePixelsPerUnit = 100f;
+            imp.SaveAndReimport();
+        }
+    }
+}
+#endif

@@ -14,7 +14,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::Proto.Data.StageTheme
   stageName: "\uC232"
   groundMaterial: {fileID: 2100000, guid: 3ea598b7573a85b469580437a238bcba, type: 2}
-  groundTileSize: 3
+  groundTileSize: 4
   groundColor: {r: 0.3, g: 0.46, b: 0.2, a: 1}
   wallColor: {r: 0.08, g: 0.11, b: 0.08, a: 1}
   skyColor: {r: 0.74, g: 0.84, b: 0.78, a: 1}
@@ -23,6 +23,9 @@ MonoBehaviour:
   fogStart: 25
   fogEnd: 48
   ambientColor: {r: 0.52, g: 0.56, b: 0.46, a: 1}
+  backdrop: {fileID: 2800000, guid: 9e98fd6258be285458f069dbce064578, type: 3}
+  backdropShift: 0.15
+  backdropHaze: 0.25
   sunColor: {r: 1, g: 0.97, b: 0.86, a: 1}
   borderTrees:
   - {fileID: 8923208229027355618, guid: 1ebbb856c8354184c83f96f00dcc3e20, type: 3}

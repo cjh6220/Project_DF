@@ -1,0 +1,385 @@
+using System.Collections;
+using System.Collections.Generic;
+using UnityEngine;
+using TMPro;
+using Proto.Data;
+
+namespace Proto.Feel
+{
+    /// <summary>
+    /// 타격감은 에셋이 아니라 코드다. 모델 퀄리티는 거의 영향이 없다.
+    ///   히트스톱(절반은 이것) · 히트 플래시 · 방향성 화면 흔들림
+    ///   + 스파크 · 찌그러짐(펀치) · 데미지 숫자 · 효과음
+    ///
+    /// 히트스톱 동안(timeScale 0)에도 스파크·펀치·숫자는 움직인다.
+    /// 멈춘 화면 위에서 불꽃이 터지고 몸이 찌그러져 있어야 '박혔다'는 느낌이 난다.
+    ///
+    /// 씬에 하나만 두고 전역으로 쓴다.
+    /// </summary>
+    public class Feel : MonoBehaviour
+    {
+        public static Feel I { get; private set; }
+
+        [SerializeField] TuningConfig cfg;
+        [SerializeField] Transform cameraRoot;
+
+        [Header("스파크")]
+        [SerializeField] Material sparkMaterial;
+
+        [Header("데미지 숫자")]
+        [SerializeField] TMP_FontAsset damageFont;
+
+        [Header("효과음 (Proto ▸ Build Feel Assets 가 생성)")]
+        [SerializeField] AudioClip swingClip;
+        [SerializeField] AudioClip hitClip;
+        [SerializeField] AudioClip killClip;
+        [SerializeField, Range(0f, 1f)] float sfxVolume = 0.8f;
+
+        Coroutine _shake;
+        float _stopUntilRealtime;
+
+        ParticleSystem _sparks;
+        ParticleSystem _flash;
+        AudioSource _audio;
+
+        readonly Queue<DamageNumber> _numbers = new Queue<DamageNumber>();
+        readonly Dictionary<Renderer, Color> _flashOriginal = new Dictionary<Renderer, Color>();
+        readonly Dictionary<Transform, Vector3> _punchBase = new Dictionary<Transform, Vector3>();
+
+        /// <summary>RunManager가 런타임 사본을 물려줄 때 쓴다.</summary>
+        public void SetConfig(TuningConfig c) => cfg = c;
+
+        void Awake()
+        {
+            I = this;
+            if (cameraRoot == null && Camera.main != null)
+                cameraRoot = Camera.main.transform;
+
+            _audio = gameObject.AddComponent<AudioSource>();
+            _audio.playOnAwake = false;
+            _audio.spatialBlend = 0f;
+
+            _sparks = BuildSparks();
+            _flash = BuildImpactFlash();
+            for (int i = 0; i < 16; i++) _numbers.Enqueue(DamageNumber.Create(transform, damageFont));
+        }
+
+        void OnDestroy()
+        {
+            if (I == this) { I = null; Time.timeScale = 1f; }
+        }
+
+        // ─────────────────────────────── 히트스톱 · 흔들림 ───────────────────────────────
+
+        /// <summary>맞는 순간 아주 짧게 시간을 멈춘다. 이게 손맛의 절반이다.</summary>
+        public void HitStop(float scale = 1f)
+        {
+            if (cfg == null) return;
+            float dur = cfg.hitStopDuration * scale;
+            float until = Time.realtimeSinceStartup + dur;
+            if (until <= _stopUntilRealtime) return;   // 더 긴 정지가 진행 중이면 무시
+            _stopUntilRealtime = until;
+            StopCoroutine(nameof(HitStopRoutine));
+            StartCoroutine(nameof(HitStopRoutine));
+        }
+
+        IEnumerator HitStopRoutine()
+        {
+            Time.timeScale = 0f;
+            while (Time.realtimeSinceStartup < _stopUntilRealtime) yield return null;
+            Time.timeScale = _timeBase;   // 슬로모션 중이었다면 슬로모션으로 돌아간다
+        }
+
+        float _timeBase = 1f;
+
+        /// <summary>보스 처치 같은 순간 — 세상이 느려진다. 실제 시간으로 잰다.</summary>
+        public void SlowMo(float scale, float realSeconds)
+        {
+            StopCoroutine(nameof(SlowMoRoutine));
+            _slowScale = scale; _slowTime = realSeconds;
+            StartCoroutine(nameof(SlowMoRoutine));
+        }
+
+        float _slowScale, _slowTime;
+
+        IEnumerator SlowMoRoutine()
+        {
+            _timeBase = _slowScale;
+            if (Time.realtimeSinceStartup >= _stopUntilRealtime) Time.timeScale = _timeBase;
+            float end = Time.realtimeSinceStartup + _slowTime;
+            while (Time.realtimeSinceStartup < end)
+            {
+                // 끝으로 갈수록 원래 속도로 풀린다
+                float k = 1f - (end - Time.realtimeSinceStartup) / _slowTime;
+                _timeBase = Mathf.Lerp(_slowScale, 1f, k * k);
+                if (Time.realtimeSinceStartup >= _stopUntilRealtime) Time.timeScale = _timeBase;
+                yield return null;
+            }
+            _timeBase = 1f;
+            if (Time.realtimeSinceStartup >= _stopUntilRealtime) Time.timeScale = 1f;
+        }
+
+        /// <summary>방향성 있게, 짧고 세게.</summary>
+        public void Shake(Vector3 direction, float scale = 1f)
+        {
+            if (cfg == null || cameraRoot == null) return;
+            if (_shake != null) StopCoroutine(_shake);
+            _shake = StartCoroutine(ShakeRoutine(direction.normalized, scale));
+        }
+
+        Vector3 _shakeOrigin;
+        bool _shaking;
+
+        IEnumerator ShakeRoutine(Vector3 dir, float scale)
+        {
+            // 흔들리는 도중에 새 흔들림이 오면 원점이 밀리지 않게 처음 원점을 유지한다
+            if (!_shaking) _shakeOrigin = cameraRoot.localPosition;
+            _shaking = true;
+
+            float t = 0f;
+            float dur = cfg.shakeDuration;
+            float amp = cfg.shakeAmplitude * scale;
+
+            while (t < dur)
+            {
+                t += Time.unscaledDeltaTime;
+                float falloff = 1f - (t / dur);
+                float wave = Mathf.Sin(t * 90f) * falloff * amp;
+                cameraRoot.localPosition = _shakeOrigin + dir * wave;
+                yield return null;
+            }
+            cameraRoot.localPosition = _shakeOrigin;
+            _shaking = false;
+            _shake = null;
+        }
+
+        // ─────────────────────────────── 플래시 · 펀치 ───────────────────────────────
+
+        /// <summary>피격 프레임에 흰색으로 덮는다. 렌더러 하나.</summary>
+        public void Flash(Renderer r)
+        {
+            if (r == null || cfg == null) return;
+            StartCoroutine(FlashRoutine(new[] { r }));
+        }
+
+        /// <summary>모델이 여러 렌더러로 나뉘어 있을 때. 몸 전체가 번쩍여야 한다.</summary>
+        public void Flash(Transform root)
+        {
+            if (root == null || cfg == null) return;
+            StartCoroutine(FlashRoutine(root.GetComponentsInChildren<Renderer>()));
+        }
+
+        IEnumerator FlashRoutine(Renderer[] rs)
+        {
+            var block = new MaterialPropertyBlock();
+            foreach (var r in rs)
+            {
+                if (r == null || r is ParticleSystemRenderer || r is SpriteRenderer) continue;   // 체력바는 번쩍이지 않는다
+                r.GetPropertyBlock(block);
+                // 이미 번쩍이는 중이면 '흰색'을 원래 색으로 착각하지 않게 처음 값을 유지한다
+                if (!_flashOriginal.ContainsKey(r))
+                {
+                    Color c = block.GetColor("_BaseColor");
+                    _flashOriginal[r] = c == default ? Color.white : c;
+                }
+                block.SetColor("_BaseColor", Color.white * 4f);
+                r.SetPropertyBlock(block);
+            }
+
+            yield return new WaitForSecondsRealtime(cfg.hitFlashDuration);
+
+            foreach (var r in rs)
+            {
+                if (r == null || !_flashOriginal.TryGetValue(r, out var orig)) continue;
+                r.GetPropertyBlock(block);
+                block.SetColor("_BaseColor", orig);
+                r.SetPropertyBlock(block);
+                _flashOriginal.Remove(r);
+            }
+        }
+
+        /// <summary>
+        /// 맞은 쪽 몸을 옆으로 찌그러뜨렸다가 튕겨 돌린다.
+        /// 히트스톱 동안 찌그러진 채로 멈춰 있는 게 핵심이라 실제 시간으로 돈다.
+        /// </summary>
+        public void Punch(Transform t, float scale = 1f)
+        {
+            if (t == null || cfg == null) return;
+            if (!_punchBase.ContainsKey(t)) _punchBase[t] = t.localScale;
+            StartCoroutine(PunchRoutine(t, scale));
+        }
+
+        IEnumerator PunchRoutine(Transform t, float scale)
+        {
+            Vector3 baseScale = _punchBase[t];
+            float amt = cfg.hitPunch * scale;
+            float dur = Mathf.Max(0.01f, cfg.hitPunchDuration);
+            float e = 0f;
+
+            while (e < dur && t != null)
+            {
+                e += Time.unscaledDeltaTime;
+                float k = Mathf.Clamp01(e / dur);
+                // 감쇠 진동 — 한 번 크게 찌그러지고 반대로 살짝 튕긴 뒤 멈춘다
+                float s = Mathf.Cos(k * Mathf.PI * 2.5f) * (1f - k) * amt;
+                t.localScale = new Vector3(baseScale.x * (1f + s), baseScale.y * (1f - s), baseScale.z * (1f + s));
+                yield return null;
+            }
+            if (t != null) t.localScale = baseScale;
+            _punchBase.Remove(t);
+        }
+
+        // ─────────────────────────────── 스파크 ───────────────────────────────
+
+        /// <summary>맞은 지점에서 때린 방향으로 불꽃을 튀긴다.</summary>
+        public void Spark(Vector3 pos, Vector3 dir, bool big = false)
+        {
+            if (_sparks == null) return;
+            dir.y = 0f;
+            dir = dir.sqrMagnitude > 0.001f ? dir.normalized : Vector3.right;
+
+            int count = big ? 22 : 12;
+            var p = new ParticleSystem.EmitParams { applyShapeToPosition = false };
+            for (int i = 0; i < count; i++)
+            {
+                // 때린 방향 ±55° 부채꼴, 약간 위로
+                Vector3 d = Quaternion.AngleAxis(Random.Range(-55f, 55f), Vector3.up) * dir;
+                d.y = Random.Range(-0.25f, 0.9f);
+                p.position = pos;
+                p.velocity = d.normalized * Random.Range(5f, big ? 13f : 10f);
+                p.startLifetime = Random.Range(0.10f, big ? 0.30f : 0.22f);
+                p.startSize = Random.Range(0.05f, 0.11f) * (big ? 1.3f : 1f);
+                p.startColor = Color.Lerp(new Color(1f, 0.95f, 0.75f), new Color(1f, 0.55f, 0.15f), Random.value);
+                _sparks.Emit(p, 1);
+            }
+
+            if (_flash != null)
+            {
+                var f = new ParticleSystem.EmitParams
+                {
+                    position = pos,
+                    velocity = Vector3.zero,
+                    startLifetime = big ? 0.12f : 0.08f,
+                    startSize = big ? 1.9f : 1.2f,
+                    startColor = new Color(1f, 0.9f, 0.7f, 0.9f),
+                    rotation = Random.Range(0f, 360f),
+                };
+                _flash.Emit(f, 1);
+            }
+        }
+
+        ParticleSystem BuildSparks()
+        {
+            var go = new GameObject("Sparks");
+            go.transform.SetParent(transform, false);
+            var ps = go.AddComponent<ParticleSystem>();
+            ps.Stop(true, ParticleSystemStopBehavior.StopEmittingAndClear);
+
+            var main = ps.main;
+            main.playOnAwake = false;
+            main.loop = true;                        // 방출은 Emit으로만 한다. 계속 재생 중이어야 입자가 움직인다
+            main.useUnscaledTime = true;             // 히트스톱 중에도 튄다
+            main.simulationSpace = ParticleSystemSimulationSpace.World;
+            main.maxParticles = 400;
+            main.gravityModifier = 1.6f;
+
+            var em = ps.emission; em.enabled = false;
+            var shape = ps.shape; shape.enabled = false;
+
+            // 빨리 식는다 — 크기가 수명에 따라 줄어든다
+            var size = ps.sizeOverLifetime;
+            size.enabled = true;
+            size.size = new ParticleSystem.MinMaxCurve(1f, AnimationCurve.Linear(0f, 1f, 1f, 0f));
+
+            var drag = ps.limitVelocityOverLifetime;
+            drag.enabled = true;
+            drag.drag = 4f;
+
+            var r = go.GetComponent<ParticleSystemRenderer>();
+            r.renderMode = ParticleSystemRenderMode.Stretch;
+            r.velocityScale = 0.045f;
+            r.lengthScale = 1.5f;
+            r.sharedMaterial = sparkMaterial;
+            r.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+            r.receiveShadows = false;
+            ps.Play();   // 방출은 Emit으로만 한다. 재생 중이어야 시뮬레이션이 돈다
+            return ps;
+        }
+
+        ParticleSystem BuildImpactFlash()
+        {
+            var go = new GameObject("ImpactFlash");
+            go.transform.SetParent(transform, false);
+            var ps = go.AddComponent<ParticleSystem>();
+            ps.Stop(true, ParticleSystemStopBehavior.StopEmittingAndClear);
+
+            var main = ps.main;
+            main.playOnAwake = false;
+            main.loop = true;                        // 방출은 Emit으로만 한다. 계속 재생 중이어야 입자가 움직인다
+            main.useUnscaledTime = true;
+            main.simulationSpace = ParticleSystemSimulationSpace.World;
+            main.maxParticles = 32;
+
+            var em = ps.emission; em.enabled = false;
+            var shape = ps.shape; shape.enabled = false;
+
+            // 한순간 크게 번졌다가 사라지는 섬광
+            var size = ps.sizeOverLifetime;
+            size.enabled = true;
+            size.size = new ParticleSystem.MinMaxCurve(1f, new AnimationCurve(
+                new Keyframe(0f, 0.5f), new Keyframe(0.3f, 1f), new Keyframe(1f, 0.2f)));
+            var col = ps.colorOverLifetime;
+            col.enabled = true;
+            var g = new Gradient();
+            g.SetKeys(new[] { new GradientColorKey(Color.white, 0f), new GradientColorKey(Color.white, 1f) },
+                      new[] { new GradientAlphaKey(1f, 0f), new GradientAlphaKey(0f, 1f) });
+            col.color = g;
+
+            var r = go.GetComponent<ParticleSystemRenderer>();
+            r.renderMode = ParticleSystemRenderMode.Billboard;
+            r.sharedMaterial = sparkMaterial;
+            r.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+            r.receiveShadows = false;
+            ps.Play();
+            return ps;
+        }
+
+        // ─────────────────────────────── 데미지 숫자 ───────────────────────────────
+
+        public enum NumberKind { Normal, Kill, Player, Info }
+
+        /// <summary>숫자가 아닌 짧은 알림 ("그로기!", "분노!").</summary>
+        public void Popup(Vector3 pos, string text)
+        {
+            if (_numbers.Count == 0) _numbers.Enqueue(DamageNumber.Create(transform, damageFont));
+            var n = _numbers.Dequeue();
+            _numbers.Enqueue(n);
+            var cam = cameraRoot != null ? cameraRoot : (Camera.main != null ? Camera.main.transform : null);
+            n.Show(pos, text, NumberKind.Info, cam != null ? cam.rotation : Quaternion.identity);
+        }
+
+        public void Number(Vector3 pos, float amount, NumberKind kind)
+        {
+            if (_numbers.Count == 0) _numbers.Enqueue(DamageNumber.Create(transform, damageFont));
+            var n = _numbers.Dequeue();
+            _numbers.Enqueue(n);   // 원형 재사용 — 가장 오래된 숫자를 가져다 쓴다
+
+            var cam = cameraRoot != null ? cameraRoot : (Camera.main != null ? Camera.main.transform : null);
+            pos += new Vector3(Random.Range(-0.25f, 0.25f), Random.Range(0f, 0.2f), 0f);
+            n.Show(pos, Mathf.RoundToInt(amount).ToString(), kind, cam != null ? cam.rotation : Quaternion.identity);
+        }
+
+        // ─────────────────────────────── 효과음 ───────────────────────────────
+
+        public void Sfx(AudioClip c, float vol = 1f, float pitchJitter = 0.08f)
+        {
+            if (c == null || _audio == null) return;
+            _audio.pitch = 1f + Random.Range(-pitchJitter, pitchJitter);
+            _audio.PlayOneShot(c, vol * sfxVolume);
+        }
+
+        public void SwingSfx() => Sfx(swingClip, 0.55f, 0.1f);
+        public void HitSfx() => Sfx(hitClip, 1f);
+        public void KillSfx() => Sfx(killClip, 1f, 0.05f);
+    }
+}

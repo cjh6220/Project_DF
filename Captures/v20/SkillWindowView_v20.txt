@@ -1,0 +1,720 @@
+using System;
+using System.Collections;
+using System.Collections.Generic;
+using UnityEngine;
+using UnityEngine.UI;
+using UnityEngine.EventSystems;
+using UnityEngine.InputSystem;
+using TMPro;
+using Proto.Core;
+
+namespace Proto.UI
+{
+    /// <summary>
+    /// 스킬 창 — 마을 오른쪽 스킬 관리 NPC가 연다.
+    ///
+    ///   위    제목 · 보유 SP · 닫기
+    ///   가운데 스킬 12종 카드. 누르면 고른다. 배운 스킬은 끌어서 퀵슬롯에 넣는다.
+    ///   아래  고른 스킬의 현재 → 다음 레벨, [배우기 · N SP] / [강화 · N SP]
+    ///   맨 아래 퀵슬롯 — 끌어서 순서 변경, 우클릭·✕·밖으로 끌기로 해제
+    ///
+    /// 상태는 RunManager.Skills(SkillBook)에 있다. 이 화면은 보여 주고 요청만 한다.
+    /// </summary>
+    public class SkillWindowView : MonoBehaviour
+    {
+        [SerializeField] RunManager run;
+
+        public bool IsOpen => _root != null && _root.gameObject.activeSelf;
+        public event Action Closed;
+
+        // ── 색 (스킬트리와 같은 계열) ──
+        static readonly Color ColPanel = new Color(0.09f, 0.075f, 0.12f, 0.98f);
+        static readonly Color ColBorder = new Color(0.86f, 0.64f, 0.30f, 1f);
+        static readonly Color ColCard = new Color(0.09f, 0.10f, 0.14f, 0.92f);
+        static readonly Color ColCardSel = new Color(0.16f, 0.14f, 0.10f, 0.95f);
+        static readonly Color ColEdge = new Color(0.40f, 0.38f, 0.48f, 0.9f);
+        static readonly Color ColGold = new Color(1f, 0.80f, 0.42f, 1f);
+        static readonly Color ColSteel = new Color(0.46f, 0.44f, 0.54f, 1f);
+        static readonly Color ColMuted = new Color(0.66f, 0.63f, 0.74f, 1f);
+        static readonly Color ColGreen = new Color(0.62f, 0.90f, 0.45f, 1f);
+        static readonly Color ColRed = new Color(1f, 0.45f, 0.40f, 1f);
+
+        const float W = 1300f, H = 900f;
+
+        class CardView
+        {
+            public int Index;
+            public RectTransform Root;
+            public Image Bg, Outline, Glow, Ring, Art;
+            public GameObject Lock;
+            public TextMeshProUGUI Status, Cmd;
+        }
+
+        class SlotView
+        {
+            public RectTransform Root;
+            public Image Outline, Ring, Art;
+            public GameObject Plus, X;
+            public TextMeshProUGUI Num;
+        }
+
+        RectTransform _root, _panel;
+        TextMeshProUGUI _sp, _slotSub, _slotFoot, _closeLabel;
+        readonly List<CardView> _cards = new List<CardView>();
+        readonly List<SlotView> _slots = new List<SlotView>();
+
+        // 아래 상세 줄
+        Image _detRing, _detArt;
+        TextMeshProUGUI _detName, _detLevel, _detHead, _detBody, _actLabel;
+        Image _actImg;
+        Button _act;
+
+        int _selected;
+        int _hover = -1;
+
+        // 끌기
+        Image _ghost;
+        int _dragSkill = -1, _dragFromSlot = -1;
+        bool _dropped;
+
+        SkillBook Book => run.Skills;
+
+        static Sprite SprCard => UiKit.Ui("CardFrame");
+        static Sprite SprCardSel => UiKit.Ui("CardFrameSel");
+        static Sprite SprRing => UiKit.Ui("IconRing");
+
+        void Awake()
+        {
+            Build();
+            _root.gameObject.SetActive(false);
+        }
+
+        void Start()
+        {
+            Book.Changed += () => { if (IsOpen) Refresh(); };
+            RefreshHints();
+        }
+
+        void OnEnable() => GameInput.SchemeChanged += RefreshHints;
+        void OnDisable() => GameInput.SchemeChanged -= RefreshHints;
+
+        /// <summary>커맨드 표기 · 슬롯 키 · 안내 문구를 지금 장치에 맞춘다.</summary>
+        void RefreshHints()
+        {
+            if (_cards.Count == 0) return;
+            bool kb = GameInput.Scheme == InputScheme.Keyboard;
+            // 왼쪽 위에서 오른쪽 아래로 물결처럼 뒤집힌다
+            foreach (var c in _cards)
+                InputFx.Set(c.Cmd, InputGlyphs.Command(SkillBook.All[c.Index].Cmd), (c.Index % 4 + c.Index / 4) * 0.035f);
+            for (int i = 0; i < _slots.Count; i++) InputFx.Set(_slots[i].Num, InputGlyphs.Slot(i), 0.2f + i * 0.04f);
+            InputFx.Set(_slotSub, kb ? "배운 스킬을 드래그하거나 A S D F로 등록" : $"스킬을 고르고 {InputGlyphs.Of(Act.Chord)} + 버튼으로 등록", 0.18f);
+            InputFx.Set(_slotFoot, kb ? "드래그로 순서 변경  ·  우클릭으로 해제" : $"같은 칸을 한 번 더 누르면 해제  ·  {InputGlyphs.Of(Act.Interact)} 배우기/강화", 0.24f);
+            InputFx.Set(_closeLabel, $"닫기 ({InputGlyphs.Of(Act.Cancel)})", 0.3f);
+            if (IsOpen) ShowDetail();
+        }
+
+        public void Open()
+        {
+            _root.gameObject.SetActive(true);
+            transform.SetAsLastSibling();
+            Refresh();
+            StartCoroutine(PopIn());
+        }
+
+        public void Close()
+        {
+            bool was = IsOpen;
+            EndDrag();
+            _root.gameObject.SetActive(false);
+            if (was) Closed?.Invoke();
+        }
+
+        void Update()
+        {
+            if (!IsOpen) return;
+            if (GameInput.CancelPressed) { Close(); return; }
+
+            // 방향키·패드 — 카드 사이 이동 (4열)
+            var d = GameInput.Navigate();
+            if (d != Vector2Int.zero)
+            {
+                int n = SkillBook.All.Length, col = _selected % 4, row = _selected / 4;
+                col = (col + d.x + 4) % 4;
+                row = (row - d.y + n / 4) % (n / 4);
+                Select(row * 4 + col);
+            }
+            if (GameInput.InteractPressed) DoAction();
+
+            // A S D F / R1 + 버튼 — 고른 스킬을 그 칸에 (이미 있으면 해제)
+            int slot = GameInput.SlotPressed();
+            if (slot >= 0 && Book.Learned(_selected))
+            {
+                if (Book.Slot(slot) == _selected) Book.Clear(slot);
+                else { Book.Assign(slot, _selected); StartCoroutine(Pop(_slots[slot].Root, 1.1f)); }
+            }
+
+            // 고른 카드는 은은하게 숨 쉰다
+            float pulse = 0.22f + 0.12f * Mathf.Sin(Time.unscaledTime * 4f);
+            foreach (var c in _cards)
+            {
+                var g = c.Glow.color;
+                g.a = c.Index == _selected ? pulse : 0f;
+                c.Glow.color = g;
+            }
+        }
+
+        // ───────────────────────────── 조립 ─────────────────────────────
+
+        void Build()
+        {
+            _root = UiKit.Stretch(UiKit.Rect(transform, "SkillWindow"));
+            var dim = UiKit.Image(_root, "Dim", new Color(0f, 0f, 0f, 0.55f), null, true);
+            UiKit.Stretch(dim.rectTransform);
+
+            var border = UiKit.Image(_root, "Border", ColBorder, UiArt.RoundRectFill, true);
+            border.type = Image.Type.Sliced;
+            UiKit.Place(border.rectTransform, new Vector2(0.5f, 0.5f), Vector2.zero, new Vector2(W + 4f, H + 4f));
+            var panel = UiKit.Image(border.transform, "Panel", ColPanel, UiArt.RoundRectFill);
+            panel.type = Image.Type.Sliced;
+            UiKit.Stretch(panel.rectTransform);
+            panel.rectTransform.offsetMin = new Vector2(2f, 2f);
+            panel.rectTransform.offsetMax = new Vector2(-2f, -2f);
+            _panel = panel.rectTransform;
+            // 금장 테두리가 있으면 기존 금색 테두리선은 숨긴다
+            if (UiKit.Frame(_panel, 0.5f) != null) border.color = new Color(0f, 0f, 0f, 0f);
+
+            BuildHeader();
+            BuildCards();
+            BuildDetail();
+            BuildSlots();
+
+            _ghost = UiKit.Image(_root, "DragGhost", new Color(1f, 1f, 1f, 0.85f));
+            _ghost.rectTransform.sizeDelta = new Vector2(84f, 84f);
+            _ghost.raycastTarget = false;
+            _ghost.gameObject.SetActive(false);
+        }
+
+        void BuildHeader()
+        {
+            var title = UiKit.Text(_panel, "Title", "스킬", 50, TextAlignmentOptions.Left);
+            Corner(title.rectTransform, new Vector2(0f, 1f), new Vector2(44f, -20f), new Vector2(300f, 64f));
+            title.fontStyle = FontStyles.Bold;
+
+            var sub = UiKit.Text(_panel, "Subtitle", "SP로 스킬을 배우고 강화하세요", 20, TextAlignmentOptions.Left);
+            Corner(sub.rectTransform, new Vector2(0f, 1f), new Vector2(46f, -84f), new Vector2(340f, 28f));
+            sub.color = ColMuted;
+
+            var info = UiKit.Text(_panel, "Info", "배운 스킬은 장착 없이 사용 가능  ·  커맨드 사용 시 재사용 시간 -10%", 18, TextAlignmentOptions.Left);
+            Corner(info.rectTransform, new Vector2(0f, 1f), new Vector2(400f, -86f), new Vector2(700f, 26f));
+            info.color = ColMuted;
+
+            _sp = UiKit.Text(_panel, "SP", "", 26, TextAlignmentOptions.Right);
+            Corner(_sp.rectTransform, new Vector2(1f, 1f), new Vector2(-110f, -26f), new Vector2(320f, 56f));
+
+            var div = UiKit.Image(_panel, "Divider", new Color(1f, 1f, 1f, 0.18f));
+            Corner(div.rectTransform, new Vector2(1f, 1f), new Vector2(-88f, -28f), new Vector2(2f, 52f));
+
+            // ✕ — 동그라미 안의 X
+            var xSpr = Resources.Load<Sprite>("UI/IconClose");
+            var x = UiKit.Image(_panel, "CloseX", xSpr != null ? new Color(0.88f, 0.89f, 0.93f, 1f) : new Color(1f, 1f, 1f, 0.001f), xSpr, true);
+            Corner(x.rectTransform, new Vector2(1f, 1f), new Vector2(-24f, -26f), new Vector2(52f, 52f));
+            if (xSpr == null)
+                for (int k = 0; k < 2; k++)
+                {
+                    var bar = UiKit.Image(x.transform, "Bar", new Color(0.88f, 0.86f, 0.92f, 1f));
+                    UiKit.Place(bar.rectTransform, new Vector2(0.5f, 0.5f), Vector2.zero, new Vector2(32f, 3f));
+                    bar.rectTransform.localRotation = Quaternion.Euler(0f, 0f, k == 0 ? 45f : -45f);
+                }
+            var xb = x.gameObject.AddComponent<Button>();
+            var c = xb.colors; c.highlightedColor = new Color(1.25f, 1.15f, 0.8f); c.colorMultiplier = 1.3f; xb.colors = c;
+            xb.onClick.AddListener(Close);
+
+            Line(_panel, -120f);
+        }
+
+        void BuildCards()
+        {
+            const float cw = 300f, ch = 140f, gap = 16f;
+            float x0 = (W - (4 * cw + 3 * gap)) * 0.5f;
+            for (int i = 0; i < SkillBook.All.Length; i++)
+            {
+                int col = i % 4, row = i / 4;
+                _cards.Add(Card(i, new Vector2(x0 + col * (cw + gap), -136f - row * (ch + gap)), new Vector2(cw, ch)));
+            }
+        }
+
+        CardView Card(int index, Vector2 pos, Vector2 size)
+        {
+            var d = SkillBook.All[index];
+            var v = new CardView { Index = index };
+
+            var glow = UiKit.Image(_panel, "Glow_" + d.Name, new Color(1f, 0.75f, 0.35f, 0f), UiKit.Soft);
+            Corner(glow.rectTransform, new Vector2(0f, 1f), pos + new Vector2(-18f, 18f), size + new Vector2(36f, 36f));
+            v.Glow = glow;
+
+            v.Bg = UiKit.Image(_panel, "Card_" + d.Name, ColCard, UiArt.RoundRectFill, true);
+            v.Bg.type = Image.Type.Sliced;
+            v.Root = v.Bg.rectTransform;
+            Corner(v.Root, new Vector2(0f, 1f), pos, size);
+            v.Outline = UiKit.Image(v.Root, "Outline", ColEdge, UiArt.RoundRectOutline);
+            v.Outline.type = Image.Type.Sliced;
+            UiKit.Stretch(v.Outline.rectTransform);
+            UiKit.FitOutline(v.Outline, SprCard, 3f, 20f);
+
+            IconDisc(v.Root, d.Icon, new Vector2(20f, 0f), 104f, out v.Ring, out v.Art);
+            v.Lock = LockBadge(v.Ring.transform);
+
+            const float tx = 142f;
+            var nm = UiKit.Text(v.Root, "Name", d.Name, 26, TextAlignmentOptions.Left);
+            Corner(nm.rectTransform, new Vector2(0f, 1f), new Vector2(tx, -16f), new Vector2(size.x - tx - 10f, 34f));
+            nm.fontStyle = FontStyles.Bold;
+            nm.enableAutoSizing = true; nm.fontSizeMax = 26f; nm.fontSizeMin = 18f;
+
+            var cmd = UiKit.Text(v.Root, "Cmd", d.Cmd, 22, TextAlignmentOptions.Left);
+            v.Cmd = cmd;
+            Corner(cmd.rectTransform, new Vector2(0f, 1f), new Vector2(tx, -50f), new Vector2(size.x - tx - 10f, 28f));
+            cmd.color = ColGold;
+
+            var role = UiKit.Text(v.Root, "Role", d.Role, 17, TextAlignmentOptions.Left);
+            Corner(role.rectTransform, new Vector2(0f, 1f), new Vector2(tx, -80f), new Vector2(size.x - tx - 10f, 24f));
+            role.color = ColMuted;
+
+            v.Status = UiKit.Text(v.Root, "Status", "", 18, TextAlignmentOptions.Left);
+            Corner(v.Status.rectTransform, new Vector2(0f, 1f), new Vector2(tx, -106f), new Vector2(size.x - tx - 10f, 26f));
+
+            var h = v.Bg.gameObject.AddComponent<SkillCardHandle>();
+            h.Click = () => Select(index);
+            h.Enter = () => { _hover = index; Paint(); };
+            h.Exit = () => { if (_hover == index) { _hover = -1; Paint(); } };
+            h.BeginDrag = e => BeginDragSkill(index, -1, e);
+            h.Drag = MoveGhost;
+            h.EndDrag = _ => EndDrag();
+            return v;
+        }
+
+        void BuildDetail()
+        {
+            float y = -604f;
+            var bg = UiKit.Image(_panel, "Detail", new Color(0.12f, 0.10f, 0.16f, 1f), UiArt.RoundRectFill);
+            bg.type = Image.Type.Sliced;
+            Corner(bg.rectTransform, new Vector2(0f, 1f), new Vector2(26f, y), new Vector2(W - 52f, 100f));
+            var ol = UiKit.Image(bg.transform, "Outline", ColEdge, UiArt.RoundRectOutline);
+            ol.type = Image.Type.Sliced;
+            UiKit.Stretch(ol.rectTransform);
+            if (SprCard != null) { UiKit.FitOutline(ol, SprCard, 3f, 20f); ol.color = new Color(1f, 1f, 1f, 0.7f); }
+            var r = bg.rectTransform;
+
+            IconDisc(r, null, new Vector2(20f, 0f), 80f, out _detRing, out _detArt);
+
+            _detName = UiKit.Text(r, "Name", "", 28, TextAlignmentOptions.Left);
+            Corner(_detName.rectTransform, new Vector2(0f, 1f), new Vector2(124f, -14f), new Vector2(260f, 36f));
+            _detName.fontStyle = FontStyles.Bold;
+            _detLevel = UiKit.Text(r, "Level", "", 26, TextAlignmentOptions.Left);
+            Corner(_detLevel.rectTransform, new Vector2(0f, 1f), new Vector2(124f, -54f), new Vector2(260f, 34f));
+
+            var div = UiKit.Image(r, "Divider", new Color(1f, 1f, 1f, 0.15f));
+            Corner(div.rectTransform, new Vector2(0f, 1f), new Vector2(400f, -18f), new Vector2(2f, 64f));
+
+            _detHead = UiKit.Text(r, "Head", "", 20, TextAlignmentOptions.Left);
+            Corner(_detHead.rectTransform, new Vector2(0f, 1f), new Vector2(430f, -16f), new Vector2(520f, 30f));
+            _detHead.color = ColMuted;
+            _detBody = UiKit.Text(r, "Body", "", 22, TextAlignmentOptions.Left);
+            Corner(_detBody.rectTransform, new Vector2(0f, 1f), new Vector2(430f, -52f), new Vector2(520f, 32f));
+
+            var prim = Resources.Load<Sprite>("UI/BtnPrimary");
+            _actImg = UiKit.Image(r, "Action", Color.white, prim != null ? prim : UiArt.GradientButton, true);
+            _actImg.type = Image.Type.Sliced;
+            Corner(_actImg.rectTransform, new Vector2(1f, 0.5f), new Vector2(-22f, 0f), new Vector2(276f, 60f));
+            _act = _actImg.gameObject.AddComponent<Button>();
+            var c = _act.colors; c.highlightedColor = new Color(1.1f, 1.1f, 1.1f); c.pressedColor = new Color(0.85f, 0.85f, 0.85f); c.disabledColor = Color.white; _act.colors = c;
+            _actLabel = UiKit.Text(_actImg.transform, "Label", "", 26);
+            UiKit.Stretch(_actLabel.rectTransform);
+            _actLabel.fontStyle = FontStyles.Bold;
+            _act.onClick.AddListener(DoAction);
+
+            Line(_panel, -720f);
+        }
+
+        void BuildSlots()
+        {
+            var t = UiKit.Text(_panel, "SlotTitle", "퀵슬롯", 30, TextAlignmentOptions.Left);
+            Corner(t.rectTransform, new Vector2(0f, 1f), new Vector2(46f, -758f), new Vector2(240f, 40f));
+            t.fontStyle = FontStyles.Bold;
+            var s = UiKit.Text(_panel, "SlotSub", "배운 스킬을 드래그해 등록", 18, TextAlignmentOptions.Left);
+            Corner(s.rectTransform, new Vector2(0f, 1f), new Vector2(46f, -800f), new Vector2(340f, 26f));
+            _slotSub = s;
+            s.color = ColMuted;
+
+            const float sz = 100f, gap = 26f;
+            float total = SkillBook.SlotCount * sz + (SkillBook.SlotCount - 1) * gap;
+            float x0 = (W - total) * 0.5f;
+            for (int i = 0; i < SkillBook.SlotCount; i++)
+                _slots.Add(Slot(i, new Vector2(x0 + i * (sz + gap), -738f), sz));
+
+            var foot = UiKit.Text(_panel, "SlotFoot", "드래그로 순서 변경  ·  우클릭으로 해제", 16);
+            Corner(foot.rectTransform, new Vector2(0.5f, 1f), new Vector2(0f, -866f), new Vector2(600f, 24f));
+            foot.rectTransform.pivot = new Vector2(0.5f, 1f);
+            foot.color = ColMuted;
+            _slotFoot = foot;
+
+            // 닫기
+            var b = UiKit.Button(_panel, "Close", "닫기 (Esc)", new Vector2(190f, 60f), 22);
+            var fill = (RectTransform)b.transform;
+            Corner(fill, new Vector2(1f, 0f), new Vector2(-30f, 30f), new Vector2(190f, 60f));
+            var lb = b.GetComponentInChildren<TextMeshProUGUI>();
+            _closeLabel = lb;
+            b.onClick.AddListener(Close);
+        }
+
+        SlotView Slot(int index, Vector2 pos, float size)
+        {
+            var v = new SlotView();
+            var bg = UiKit.Image(_panel, "Slot" + (index + 1), new Color(0.12f, 0.10f, 0.16f, 1f), UiArt.RoundRectFill, true);
+            bg.type = Image.Type.Sliced;
+            v.Root = bg.rectTransform;
+            Corner(v.Root, new Vector2(0f, 1f), pos, new Vector2(size, size));
+            v.Outline = UiKit.Image(v.Root, "Outline", ColEdge, UiArt.RoundRectOutline);
+            v.Outline.type = Image.Type.Sliced;
+            UiKit.Stretch(v.Outline.rectTransform);
+            var slotSpr = UiKit.Ui("SlotFrame");
+            if (slotSpr != null)
+            {
+                // 아래 가운데 홈에 키 배지가 들어간다 — 홈이 있는 그림은 늘리지 않고 칸 크기에 통째로 맞춘다
+                v.Outline.sprite = slotSpr; v.Outline.type = Image.Type.Simple;
+                var ort = v.Outline.rectTransform; float o = size * 8f / 452f;
+                ort.offsetMin = new Vector2(-o, -o); ort.offsetMax = new Vector2(o, o);
+                v.Outline.color = new Color(1f, 1f, 1f, 0.8f);
+                bg.sprite = null; bg.color = new Color(0f, 0f, 0f, 0f);
+            }
+
+            // 비었을 때 + (선 두 개)
+            var plus = UiKit.Rect(v.Root, "Plus");
+            UiKit.Place(plus, new Vector2(0.5f, 0.5f), Vector2.zero, new Vector2(34f, 34f));
+            for (int k = 0; k < 2; k++)
+            {
+                var bar = UiKit.Image(plus, "Bar", new Color(1f, 1f, 1f, 0.35f));
+                UiKit.Place(bar.rectTransform, new Vector2(0.5f, 0.5f), Vector2.zero, k == 0 ? new Vector2(34f, 3f) : new Vector2(3f, 34f));
+            }
+            v.Plus = plus.gameObject;
+
+            var ring = UiKit.Image(v.Root, "Ring", SprRing != null ? Color.white : ColGold, SprRing != null ? SprRing : UiArt.MetalDisc);
+            UiKit.Place(ring.rectTransform, new Vector2(0.5f, 0.5f), Vector2.zero, new Vector2(80f, 80f));
+            var inner = UiKit.Image(ring.transform, "Inner", new Color(0.08f, 0.06f, 0.12f, 1f), UiArt.Disc);
+            UiKit.Place(inner.rectTransform, new Vector2(0.5f, 0.5f), Vector2.zero, new Vector2(68f, 68f));
+            inner.gameObject.AddComponent<Mask>().showMaskGraphic = true;
+            v.Art = UiKit.Image(inner.transform, "Art", Color.white);
+            UiKit.Place(v.Art.rectTransform, new Vector2(0.5f, 0.5f), Vector2.zero, new Vector2(64f, 64f));
+            v.Ring = ring;
+
+            // 번호표
+            var key = UiKit.Ui("KeyBadge");
+            var num = UiKit.Image(v.Root, "Num", key != null ? Color.white : new Color(0.16f, 0.14f, 0.22f, 1f), key != null ? key : UiArt.RoundRectFill);
+            num.type = key != null ? Image.Type.Simple : Image.Type.Sliced;
+            UiKit.Place(num.rectTransform, new Vector2(0.5f, 0f), new Vector2(0f, key != null ? 4f : 0f), key != null ? new Vector2(46f, 29f) : new Vector2(40f, 26f));
+            if (key == null)
+            {
+                var nol = UiKit.Image(num.transform, "Outline", ColEdge, UiArt.RoundRectOutline);
+                nol.type = Image.Type.Sliced;
+                UiKit.Stretch(nol.rectTransform);
+            }
+            var nt = UiKit.Text(num.transform, "N", (index + 1).ToString(), 18);
+            UiKit.Stretch(nt.rectTransform);
+            v.Num = nt;
+
+            // ✕ 해제
+            var x = UiKit.Image(v.Root, "Remove", new Color(0.18f, 0.16f, 0.24f, 1f), UiArt.Disc, true);
+            UiKit.Place(x.rectTransform, new Vector2(1f, 1f), new Vector2(-4f, -4f), new Vector2(30f, 30f));
+            var xo = UiKit.Image(x.transform, "Ring", new Color(0.85f, 0.83f, 0.92f, 1f), UiKit.Ring);
+            UiKit.Stretch(xo.rectTransform);
+            for (int k = 0; k < 2; k++)
+            {
+                var bar = UiKit.Image(x.transform, "Bar", new Color(0.92f, 0.90f, 0.96f, 1f));
+                UiKit.Place(bar.rectTransform, new Vector2(0.5f, 0.5f), Vector2.zero, new Vector2(15f, 2.5f));
+                bar.rectTransform.localRotation = Quaternion.Euler(0f, 0f, k == 0 ? 45f : -45f);
+            }
+            var xb = x.gameObject.AddComponent<Button>();
+            xb.onClick.AddListener(() => Book.Clear(index));
+            v.X = x.gameObject;
+
+            var h = bg.gameObject.AddComponent<SkillSlotHandle>();
+            h.RightClick = () => Book.Clear(index);
+            h.Drop = () => DropOnSlot(index);
+            var rest = v.Outline.color;
+            h.Enter = () => { if (_dragSkill >= 0) v.Outline.color = ColGold; };
+            h.Exit = () => v.Outline.color = rest;
+            h.BeginDrag = e => { if (Book.Slot(index) >= 0) BeginDragSkill(Book.Slot(index), index, e); };
+            h.Drag = MoveGhost;
+            h.EndDrag = _ => EndDrag();
+            return v;
+        }
+
+        // ───────────────────────────── 상태 ─────────────────────────────
+
+        void Refresh()
+        {
+            RefreshHints();
+            _sp.text = $"<color=#e8e4f0>보유 SP</color>   <size=44><color=#ffcc6b><b>{Book.Sp}</b></color></size>";
+            Paint();
+
+            for (int s = 0; s < _slots.Count; s++)
+            {
+                var v = _slots[s];
+                int k = Book.Slot(s);
+                bool has = k >= 0;
+                v.Plus.SetActive(!has);
+                v.Ring.gameObject.SetActive(has);
+                v.X.SetActive(has);
+                if (has) SetArt(v.Art, SkillBook.All[k].Icon, true);
+            }
+
+            ShowDetail();
+        }
+
+        /// <summary>카드 색만 다시 칠한다 (호버·선택이 바뀔 때).</summary>
+        void Paint()
+        {
+            foreach (var c in _cards)
+            {
+                int i = c.Index;
+                var d = SkillBook.All[i];
+                bool learned = Book.Learned(i);
+                bool sel = i == _selected;
+
+                c.Bg.color = sel ? ColCardSel : ColCard;
+                if (SprCard != null)
+                {
+                    c.Outline.sprite = sel && SprCardSel != null ? SprCardSel : SprCard;
+                    c.Outline.color = sel ? Color.white : (i == _hover ? new Color(1f, 0.92f, 0.75f, 1f) : new Color(1f, 1f, 1f, 0.7f));
+                }
+                else c.Outline.color = sel ? ColGold : (i == _hover ? new Color(0.70f, 0.62f, 0.50f, 1f) : ColEdge);
+                c.Ring.color = SprRing != null ? (learned ? Color.white : new Color(0.55f, 0.56f, 0.62f, 1f)) : (learned ? ColGold : ColSteel);
+                c.Art.color = learned ? Color.white : new Color(0.62f, 0.60f, 0.68f, 1f);
+                c.Lock.SetActive(!learned);
+
+                if (learned)
+                    c.Status.text = Book.Maxed(i)
+                        ? $"<color=#ffcc6b>Lv. {Book.Level(i)} / {d.MaxLevel}  마스터</color>"
+                        : $"<color=#9be37a>Lv. {Book.Level(i)} / {d.MaxLevel}</color>";
+                else
+                    c.Status.text = $"<color=#8f8aa3>미습득  ·  </color><color=#ffcc6b>{d.LearnCost} SP</color>";
+            }
+        }
+
+        void ShowDetail()
+        {
+            int i = _selected;
+            var d = SkillBook.All[i];
+            bool learned = Book.Learned(i);
+            int lv = Book.Level(i);
+
+            _detRing.color = SprRing != null ? (learned ? Color.white : new Color(0.55f, 0.56f, 0.62f, 1f)) : (learned ? ColGold : ColSteel);
+            SetArt(_detArt, d.Icon, learned);
+            _detName.text = d.Name;
+
+            bool ok; string reason; int cost;
+            if (!learned)
+            {
+                _detLevel.text = "<color=#8f8aa3>미습득</color>  <color=#9be37a>→ Lv. 1</color>";
+                _detHead.text = "배우면";
+                _detBody.text = $"{d.Role}  ·  커맨드 <color=#ffcc6b>{d.Cmd}</color>";
+                ok = Book.CanLearn(i, out reason);
+                cost = d.LearnCost;
+                _actLabel.text = $"배우기  ·  {cost} SP";
+            }
+            else if (Book.Maxed(i))
+            {
+                _detLevel.text = $"<color=#ffcc6b>Lv. {lv}  마스터</color>";
+                _detHead.text = "마스터 효과";
+                _detBody.text = d.Mastery;
+                ok = false; reason = null; cost = 0;
+                _actLabel.text = "최대 레벨";
+            }
+            else
+            {
+                _detLevel.text = $"<color=#9be37a>Lv. {lv}  →  {lv + 1}</color>";
+                bool toMaster = lv + 1 >= d.MaxLevel;
+                _detHead.text = toMaster ? "다음 레벨  <color=#ffcc6b>· 마스터</color>" : "다음 레벨";
+                _detBody.text = toMaster ? $"{d.PerLevel}  ·  <color=#ffcc6b>{d.Mastery}</color>" : d.PerLevel;
+                ok = Book.CanUpgrade(i, out reason);
+                cost = d.CostPerLevel;
+                _actLabel.text = $"강화  ·  {cost} SP";
+            }
+
+            // 막힌 이유가 SP가 아니면 (선행 조건) 그걸 보여 준다
+            if (!ok && reason != null && reason != "SP가 부족합니다" && !learned)
+                _detBody.text = $"<color=#ff8f80>{reason}</color>";
+            else if (!ok && reason == "SP가 부족합니다")
+                _detHead.text += "   <color=#ff8f80>SP가 부족합니다</color>";
+
+            _act.interactable = ok;
+            _actImg.color = ok ? Color.white : new Color(0.42f, 0.42f, 0.46f, 1f);
+            _actLabel.color = ok ? new Color(0.22f, 0.13f, 0.05f, 1f) : new Color(0.75f, 0.73f, 0.80f, 1f);
+        }
+
+        void Select(int i)
+        {
+            if (_selected == i) return;
+            _selected = i;
+            Paint();
+            ShowDetail();
+            StartCoroutine(Pop(_cards[i].Root, 1.04f));
+        }
+
+        void DoAction()
+        {
+            int i = _selected;
+            bool done = Book.Learned(i) ? Book.Upgrade(i) : Book.Learn(i);
+            if (!done) return;
+            StartCoroutine(Pop(_cards[i].Root, 1.08f));
+            StartCoroutine(Pop(_actImg.rectTransform, 1.06f));
+            if (Proto.Feel.Feel.I != null) Proto.Feel.Feel.I.KillSfx();
+        }
+
+        // ───────────────────────────── 끌기 ─────────────────────────────
+
+        void BeginDragSkill(int skill, int fromSlot, PointerEventData e)
+        {
+            if (!Book.Learned(skill)) return;
+            _dragSkill = skill;
+            _dragFromSlot = fromSlot;
+            _dropped = false;
+            _ghost.sprite = Resources.Load<Sprite>("Icons/" + SkillBook.All[skill].Icon);
+            _ghost.gameObject.SetActive(true);
+            _ghost.transform.SetAsLastSibling();
+            MoveGhost(e);
+        }
+
+        void MoveGhost(PointerEventData e)
+        {
+            if (_dragSkill < 0) return;
+            RectTransformUtility.ScreenPointToLocalPointInRectangle(_root, e.position, null, out var lp);
+            _ghost.rectTransform.anchoredPosition = lp;
+        }
+
+        void DropOnSlot(int slot)
+        {
+            if (_dragSkill < 0) return;
+            _dropped = true;
+            if (_dragFromSlot >= 0) Book.Swap(_dragFromSlot, slot);
+            else Book.Assign(slot, _dragSkill);
+            StartCoroutine(Pop(_slots[slot].Root, 1.1f));
+        }
+
+        void EndDrag()
+        {
+            // 퀵슬롯에서 끌어내 아무 칸에도 안 놓으면 해제
+            if (_dragSkill >= 0 && _dragFromSlot >= 0 && !_dropped) Book.Clear(_dragFromSlot);
+            _dragSkill = -1;
+            _dragFromSlot = -1;
+            if (_ghost != null) _ghost.gameObject.SetActive(false);
+            foreach (var s in _slots) s.Outline.color = ColEdge;
+        }
+
+        // ───────────────────────────── 도구 ─────────────────────────────
+
+        void IconDisc(RectTransform parent, string icon, Vector2 pos, float size, out Image ring, out Image art)
+        {
+            ring = UiKit.Image(parent, "Ring", SprRing != null ? Color.white : ColGold, SprRing != null ? SprRing : UiArt.MetalDisc);
+            Corner(ring.rectTransform, new Vector2(0f, 0.5f), pos, new Vector2(size, size));
+            var inner = UiKit.Image(ring.transform, "Inner", new Color(0.08f, 0.06f, 0.12f, 1f), UiArt.Disc);
+            UiKit.Place(inner.rectTransform, new Vector2(0.5f, 0.5f), Vector2.zero, new Vector2(size * 0.86f, size * 0.86f));
+            inner.gameObject.AddComponent<Mask>().showMaskGraphic = true;
+            art = UiKit.Image(inner.transform, "Art", Color.white);
+            UiKit.Place(art.rectTransform, new Vector2(0.5f, 0.5f), Vector2.zero, new Vector2(size * 0.81f, size * 0.81f));
+            if (icon != null) SetArt(art, icon, true);
+        }
+
+        GameObject LockBadge(Transform ring)
+        {
+            var lk = UiKit.Image(ring, "Lock", new Color(0.06f, 0.07f, 0.10f, 0.95f), UiArt.Disc);
+            UiKit.Place(lk.rectTransform, new Vector2(0.5f, 0f), new Vector2(0f, 8f), new Vector2(30f, 30f));
+            var lockSpr = UiKit.Ui("IconLock");
+            var li = UiKit.Image(lk.transform, "Icon", new Color(0.85f, 0.86f, 0.92f, 1f), lockSpr != null ? lockSpr : UiArt.Lock);
+            li.preserveAspect = true;
+            UiKit.Place(li.rectTransform, new Vector2(0.5f, 0.5f), Vector2.zero, new Vector2(18f, 18f));
+            return lk.gameObject;
+        }
+
+        static void SetArt(Image img, string icon, bool bright)
+        {
+            img.sprite = Resources.Load<Sprite>("Icons/" + icon);
+            img.color = img.sprite == null ? Color.clear : (bright ? Color.white : new Color(0.62f, 0.60f, 0.68f, 1f));
+        }
+
+        static void Line(RectTransform p, float y)
+        {
+            if (Resources.Load<Sprite>("UI/DividerLine") != null) { UiKit.Divider(p, y - 1f); return; }
+            var line = UiKit.Image(p, "Line", new Color(1f, 1f, 1f, 0.12f));
+            line.rectTransform.anchorMin = new Vector2(0f, 1f); line.rectTransform.anchorMax = new Vector2(1f, 1f);
+            line.rectTransform.pivot = new Vector2(0.5f, 1f);
+            line.rectTransform.offsetMin = new Vector2(26f, y - 2f); line.rectTransform.offsetMax = new Vector2(-26f, y);
+        }
+
+        static void Corner(RectTransform rt, Vector2 anchor, Vector2 pos, Vector2 size)
+        {
+            rt.anchorMin = rt.anchorMax = anchor;
+            rt.pivot = anchor;
+            rt.anchoredPosition = pos;
+            rt.sizeDelta = size;
+        }
+
+        IEnumerator PopIn()
+        {
+            var cg = _panel.parent.GetComponent<CanvasGroup>();
+            if (cg == null) cg = _panel.parent.gameObject.AddComponent<CanvasGroup>();
+            float t = 0f;
+            while (t < 0.18f)
+            {
+                t += Time.unscaledDeltaTime;
+                float k = Mathf.Clamp01(t / 0.18f);
+                cg.alpha = k;
+                _panel.parent.localScale = Vector3.one * Mathf.Lerp(0.96f, 1f, 1f - (1f - k) * (1f - k));
+                yield return null;
+            }
+            cg.alpha = 1f;
+            _panel.parent.localScale = Vector3.one;
+        }
+
+        IEnumerator Pop(RectTransform rt, float peak)
+        {
+            float t = 0f;
+            while (t < 0.2f)
+            {
+                t += Time.unscaledDeltaTime;
+                float k = Mathf.Clamp01(t / 0.2f);
+                rt.localScale = Vector3.one * Mathf.Lerp(peak, 1f, k);
+                yield return null;
+            }
+            rt.localScale = Vector3.one;
+        }
+    }
+
+    /// <summary>스킬 카드 입력 — 누르기·올리기·끌기.</summary>
+    public class SkillCardHandle : MonoBehaviour, IPointerClickHandler, IPointerEnterHandler, IPointerExitHandler,
+                                   IBeginDragHandler, IDragHandler, IEndDragHandler
+    {
+        public Action Click, Enter, Exit;
+        public Action<PointerEventData> BeginDrag, Drag, EndDrag;
+        public void OnPointerClick(PointerEventData e) { if (!e.dragging && e.button == PointerEventData.InputButton.Left) Click?.Invoke(); }
+        public void OnPointerEnter(PointerEventData e) => Enter?.Invoke();
+        public void OnPointerExit(PointerEventData e) => Exit?.Invoke();
+        public void OnBeginDrag(PointerEventData e) => BeginDrag?.Invoke(e);
+        public void OnDrag(PointerEventData e) => Drag?.Invoke(e);
+        public void OnEndDrag(PointerEventData e) => EndDrag?.Invoke(e);
+    }
+
+    /// <summary>퀵슬롯 칸 입력 — 놓기·우클릭 해제·끌어서 순서 변경.</summary>
+    public class SkillSlotHandle : MonoBehaviour, IDropHandler, IPointerClickHandler, IPointerEnterHandler, IPointerExitHandler,
+                                   IBeginDragHandler, IDragHandler, IEndDragHandler
+    {
+        public Action Drop, RightClick, Enter, Exit;
+        public Action<PointerEventData> BeginDrag, Drag, EndDrag;
+        public void OnDrop(PointerEventData e) => Drop?.Invoke();
+        public void OnPointerClick(PointerEventData e) { if (e.button == PointerEventData.InputButton.Right) RightClick?.Invoke(); }
+        public void OnPointerEnter(PointerEventData e) => Enter?.Invoke();
+        public void OnPointerExit(PointerEventData e) => Exit?.Invoke();
+        public void OnBeginDrag(PointerEventData e) => BeginDrag?.Invoke(e);
+        public void OnDrag(PointerEventData e) => Drag?.Invoke(e);
+        public void OnEndDrag(PointerEventData e) => EndDrag?.Invoke(e);
+    }
+}

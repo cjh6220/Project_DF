@@ -1,0 +1,850 @@
+using System;
+using System.Collections;
+using System.Collections.Generic;
+using UnityEngine;
+using UnityEngine.EventSystems;
+using UnityEngine.InputSystem;
+using UnityEngine.UI;
+using TMPro;
+using Proto.Core;
+
+namespace Proto.UI
+{
+    /// <summary>
+    /// 노드형 스킬트리 화면.
+    ///
+    ///   위 — 제목, 보유 자원 6종
+    ///   가운데 — 금속 링 원형 노드. 선행 노드를 찍어야 다음 노드가 열린다 (잠긴 노드는 자물쇠)
+    ///   노드에 올리면 오른쪽에 툴팁 (갈래 · 이름 · 레벨 · 효과 · 비용 보유/필요)
+    ///   아래 — [중앙 정렬] [테스트 미리보기] [마을로] / [시작 ›]
+    ///
+    /// 마을의 성장 관리 NPC가 연다. Esc나 [마을로]로 닫으면 마을로 돌아간다.
+    ///
+    /// 드래그로 이동, 휠로 확대/축소, 클릭하면 구매.
+    /// 화면은 전부 코드로 만든다. 노드는 Progression.Nodes 데이터에서 읽는다.
+    /// </summary>
+    public class SkillTreeView : MonoBehaviour
+    {
+        [SerializeField] RunManager run;
+        [SerializeField] IrisTransition iris;
+
+        [Header("보기")]
+        [SerializeField] float minZoom = 0.55f;
+        [SerializeField] float maxZoom = 1.8f;
+        [SerializeField] Vector2 homeOffset = new Vector2(0f, -250f);   // 트리가 위로 뻗으므로 시작점을 아래에 둔다
+
+        /// <summary>노드 데이터 좌표에 곱하는 간격. 노드가 커진 만큼 벌린다.</summary>
+        const float Spread = 1.35f;
+        const float NodeSize = 108f, KeySize = 124f, CoreSize = 144f;
+        const float PreviewSize = 84f, PreviewKeySize = 100f;
+
+        // ── 색 ──
+        static readonly Color ColBg = new Color(0.10f, 0.07f, 0.15f, 1f);
+        static readonly Color ColGold = new Color(1f, 0.80f, 0.42f, 1f);
+        static readonly Color ColGoldDim = new Color(0.72f, 0.56f, 0.32f, 1f);
+        static readonly Color ColGoldHot = new Color(1f, 0.86f, 0.50f, 1f);
+        static readonly Color ColSteel = new Color(0.46f, 0.44f, 0.54f, 1f);
+        static readonly Color ColInner = new Color(0.08f, 0.06f, 0.12f, 1f);
+        static readonly Color ColEdgeOn = new Color(0.98f, 0.74f, 0.36f, 1f);
+        static readonly Color ColEdgeOff = new Color(0.36f, 0.34f, 0.44f, 1f);
+        static readonly Color ColPanel = new Color(0.08f, 0.06f, 0.12f, 0.97f);
+        static readonly Color ColBorder = new Color(0.86f, 0.64f, 0.30f, 1f);
+        static readonly Color ColMuted = new Color(0.62f, 0.59f, 0.70f, 1f);
+
+        class NodeView
+        {
+            public UpgradeNode Data;
+            public RectTransform Root;
+            public Image Glow, Ring, Inner, Art;
+            public GameObject Lock;
+            public TextMeshProUGUI Icon, Label;
+            public readonly List<Image> InEdges = new List<Image>();
+            public bool Preview;
+            public bool Core;
+        }
+
+        RectTransform _root, _content, _edges, _nodes, _tooltip, _preview;
+        TextMeshProUGUI _tipCat, _tipName, _tipBody, _tipCost, _tipStatus, _previewLabel;
+        Image _tipCostIcon, _tipArrow;
+        RectTransform _tipCostRow, _tipDiv2;
+        Canvas _canvas;
+        float _zoom = 1f;
+        bool _previewOn;
+        NodeView _hover;
+        readonly Dictionary<NodeId, NodeView> _views = new Dictionary<NodeId, NodeView>();
+        readonly Dictionary<ResourceId, TextMeshProUGUI> _bank = new Dictionary<ResourceId, TextMeshProUGUI>();
+
+        public bool IsOpen => _root != null && _root.gameObject.activeSelf;
+        float MinZoom => _previewOn ? 0.25f : minZoom;
+
+        void Awake()
+        {
+            _canvas = GetComponentInParent<Canvas>();
+            Build();
+            _root.gameObject.SetActive(false);
+        }
+
+        void Start()
+        {
+            run.Bank.Changed += (_, __) => { if (IsOpen) Refresh(); };
+            run.Progression.Changed += () => { if (IsOpen) Refresh(); };
+        }
+
+        public void Open()
+        {
+            _root.gameObject.SetActive(true);
+            transform.SetAsLastSibling();
+            if (_previewOn) SetPreview(false, false);
+            _zoom = 1f;
+            _content.localScale = Vector3.one;
+            _content.anchoredPosition = homeOffset;
+            HideTip();
+            Refresh();
+        }
+
+        /// <summary>창을 닫은 순간. 마을이 플레이어 조작을 돌려준다.</summary>
+        public event Action Closed;
+
+        public void Close()
+        {
+            bool was = IsOpen;
+            HideTip();
+            _root.gameObject.SetActive(false);
+            if (was) Closed?.Invoke();
+        }
+
+        // ───────────────────────────── 조립 ─────────────────────────────
+
+        void Build()
+        {
+            _root = UiKit.Stretch(UiKit.Rect(transform, "SkillTree"));
+
+            var bg = UiKit.Image(_root, "Background", ColBg, null, true);
+            UiKit.Stretch(bg.rectTransform);
+            bg.gameObject.AddComponent<TreeDragArea>().View = this;
+
+            // 보라빛 성운 — 고정 시드라 매번 같다
+            var rng = new System.Random(3);
+            for (int i = 0; i < 7; i++)
+            {
+                var blob = UiKit.Image(bg.transform, "Nebula", new Color(0.38f, 0.20f, 0.58f, 0.10f + (float)rng.NextDouble() * 0.08f), UiKit.Soft);
+                UiKit.Place(blob.rectTransform, new Vector2((float)rng.NextDouble(), (float)rng.NextDouble()),
+                    Vector2.zero, Vector2.one * (500f + (float)rng.NextDouble() * 700f));
+            }
+
+            _content = UiKit.Rect(_root, "Graph");
+            UiKit.Place(_content, new Vector2(0.5f, 0.5f), homeOffset, Vector2.zero);
+            _edges = UiKit.Rect(_content, "Edges");
+            _nodes = UiKit.Rect(_content, "Nodes");
+
+            var core = MakeNode(_nodes, "Core", Vector2.zero, CoreSize);
+            core.Core = true;
+            core.Icon.text = "시작";
+            SetArt(core, "explore_start");
+            core.Ring.color = ColGoldHot;
+            core.Glow.color = new Color(1f, 0.65f, 0.25f, 0.35f);
+
+            foreach (var n in Progression.Nodes)
+            {
+                var v = MakeNode(_nodes, "Node_" + n.Id, n.Pos * Spread, n.Keystone ? KeySize : NodeSize);
+                v.Data = n;
+                v.Icon.text = n.Icon;
+                SetArt(v, n.IconKey);
+                Hook(v, () => TryBuy(v));
+                _views[n.Id] = v;
+            }
+
+            foreach (var v in _views.Values)
+            {
+                if (v.Data.Requires.Length == 0) v.InEdges.Add(Edge(_edges, Vector2.zero, v.Data.Pos * Spread, 7f));
+                foreach (var r in v.Data.Requires)
+                    v.InEdges.Add(Edge(_edges, Progression.Find(r).Pos * Spread, v.Data.Pos * Spread, 7f));
+            }
+
+            BuildPreview();
+            BuildHeader();
+            BuildTooltip();
+            BuildButtons();
+        }
+
+        NodeView MakeNode(Transform parent, string name, Vector2 pos, float size)
+        {
+            var v = new NodeView();
+            v.Root = UiKit.Place(UiKit.Rect(parent, name), new Vector2(0.5f, 0.5f), pos, Vector2.one * size);
+
+            v.Glow = UiKit.Image(v.Root, "Glow", new Color(1f, 0.6f, 0.2f, 0f), UiKit.Soft);
+            UiKit.Place(v.Glow.rectTransform, new Vector2(0.5f, 0.5f), Vector2.zero, Vector2.one * size * 1.9f);
+
+            // 바깥 금속 링
+            v.Ring = UiKit.Image(v.Root, "Ring", ColSteel, UiArt.MetalDisc);
+            UiKit.Stretch(v.Ring.rectTransform);
+
+            // 안쪽 어두운 판 + 아이콘 (원 안으로만 보이게 마스크)
+            v.Inner = UiKit.Image(v.Root, "Inner", ColInner, UiArt.Disc, true);
+            UiKit.Stretch(v.Inner.rectTransform);
+            float inset = size * 0.075f;
+            v.Inner.rectTransform.offsetMin = new Vector2(inset, inset);
+            v.Inner.rectTransform.offsetMax = new Vector2(-inset, -inset);
+            v.Inner.gameObject.AddComponent<Mask>().showMaskGraphic = true;
+
+            v.Art = UiKit.Image(v.Inner.transform, "Art", Color.white);
+            UiKit.Place(v.Art.rectTransform, new Vector2(0.5f, 0.5f), Vector2.zero, Vector2.one * (size - inset * 2f) * 0.94f);
+            v.Art.preserveAspect = true;
+            v.Art.gameObject.SetActive(false);
+
+            v.Icon = UiKit.Text(v.Root, "Icon", "", size * 0.3f);
+            UiKit.Stretch(v.Icon.rectTransform);
+            v.Icon.fontStyle = FontStyles.Bold;
+
+            // 자물쇠 — 링 아래쪽에 걸친 작은 원
+            var lockBg = UiKit.Image(v.Root, "Lock", new Color(0.12f, 0.11f, 0.17f, 1f), UiArt.Disc);
+            UiKit.Place(lockBg.rectTransform, new Vector2(0.5f, 0f), new Vector2(0f, size * 0.06f), Vector2.one * size * 0.3f);
+            var lockRim = UiKit.Image(lockBg.transform, "Rim", ColSteel, UiArt.MetalDisc);
+            UiKit.Stretch(lockRim.rectTransform);
+            lockRim.transform.SetAsFirstSibling();
+            var lockIn = UiKit.Image(lockBg.transform, "In", new Color(0.12f, 0.11f, 0.17f, 1f), UiArt.Disc);
+            UiKit.Stretch(lockIn.rectTransform);
+            lockIn.rectTransform.offsetMin = new Vector2(2.5f, 2.5f);
+            lockIn.rectTransform.offsetMax = new Vector2(-2.5f, -2.5f);
+            var lockIcon = UiKit.Image(lockBg.transform, "Icon", new Color(0.9f, 0.88f, 0.95f, 1f), UiArt.Lock);
+            UiKit.Place(lockIcon.rectTransform, new Vector2(0.5f, 0.5f), Vector2.zero, Vector2.one * size * 0.19f);
+            v.Lock = lockBg.gameObject;
+            v.Lock.SetActive(false);
+
+            v.Label = UiKit.Text(v.Root, "Label", "", 22);
+            UiKit.Place(v.Label.rectTransform, new Vector2(0.5f, 0f), new Vector2(0f, -22f), new Vector2(220f, 28f));
+            v.Label.color = new Color(0.9f, 0.88f, 0.94f, 1f);
+            return v;
+        }
+
+        void Hook(NodeView v, Action click)
+        {
+            var hover = v.Inner.gameObject.AddComponent<TreeNodeHover>();
+            hover.Enter = () => ShowTip(v);
+            hover.Exit = () => { if (_hover == v) HideTip(); };
+            hover.Click = click;
+        }
+
+        /// <summary>아이콘 그림을 붙인다. 파일이 없으면 한 글자를 그대로 둔다.</summary>
+        static void SetArt(NodeView v, string key)
+        {
+            if (string.IsNullOrEmpty(key)) return;
+            var sprite = Resources.Load<Sprite>("Icons/" + key);
+            if (sprite == null) return;
+            v.Art.sprite = sprite;
+            v.Art.gameObject.SetActive(true);
+            v.Icon.gameObject.SetActive(false);
+        }
+
+        static Image Edge(Transform parent, Vector2 a, Vector2 b, float width)
+        {
+            var img = UiKit.Image(parent, "Edge", ColEdgeOff);
+            var rt = img.rectTransform;
+            Vector2 d = b - a;
+            UiKit.Place(rt, new Vector2(0.5f, 0.5f), (a + b) * 0.5f, new Vector2(d.magnitude, width));
+            rt.localRotation = Quaternion.Euler(0f, 0f, Mathf.Atan2(d.y, d.x) * Mathf.Rad2Deg);
+            return img;
+        }
+
+        void BuildHeader()
+        {
+            var title = UiKit.Text(_root, "Title", "스킬 트리", 46, TextAlignmentOptions.Left);
+            Corner(title.rectTransform, new Vector2(0f, 1f), new Vector2(44f, -22f), new Vector2(600f, 60f));
+            title.fontStyle = FontStyles.Bold;
+
+            var sub = UiKit.Text(_root, "Subtitle", "드래그 이동 · 휠 확대/축소", 21, TextAlignmentOptions.Left);
+            Corner(sub.rectTransform, new Vector2(0f, 1f), new Vector2(46f, -80f), new Vector2(600f, 28f));
+            sub.color = new Color(1f, 1f, 1f, 0.7f);
+
+            var line = UiKit.Image(_root, "HeaderLine", new Color(1f, 1f, 1f, 0.13f));
+            var lrt = line.rectTransform;
+            lrt.anchorMin = new Vector2(0f, 1f); lrt.anchorMax = new Vector2(1f, 1f);
+            lrt.pivot = new Vector2(0.5f, 1f);
+            lrt.offsetMin = new Vector2(0f, -114f); lrt.offsetMax = new Vector2(0f, -112f);
+
+            // 오른쪽 위 — 보유 자원 (아이콘 + 숫자, 사이에 얇은 구분선)
+            var bar = UiKit.Rect(_root, "Bank");
+            bar.anchorMin = bar.anchorMax = new Vector2(1f, 1f);
+            bar.pivot = new Vector2(1f, 0.5f);
+            bar.anchoredPosition = new Vector2(-44f, -56f);
+            var layout = bar.gameObject.AddComponent<HorizontalLayoutGroup>();
+            layout.spacing = 16f;
+            layout.childAlignment = TextAnchor.MiddleRight;
+            layout.childControlWidth = true; layout.childControlHeight = true;
+            layout.childForceExpandWidth = false; layout.childForceExpandHeight = false;
+            var fit = bar.gameObject.AddComponent<ContentSizeFitter>();
+            fit.horizontalFit = ContentSizeFitter.FitMode.PreferredSize;
+            fit.verticalFit = ContentSizeFitter.FitMode.PreferredSize;
+
+            bool first = true;
+            foreach (ResourceId id in Enum.GetValues(typeof(ResourceId)))
+            {
+                if (!first)
+                {
+                    var div = UiKit.Image(bar, "Div", new Color(1f, 1f, 1f, 0.18f));
+                    var le = div.gameObject.AddComponent<LayoutElement>();
+                    le.preferredWidth = 2f; le.preferredHeight = 40f;
+                }
+                first = false;
+
+                var icon = UiKit.Image(bar, "Icon_" + id, Color.white, Resources.Load<Sprite>("Icons/res_" + id.ToString().ToLowerInvariant()));
+                icon.preserveAspect = true;
+                var ile = icon.gameObject.AddComponent<LayoutElement>();
+                ile.preferredWidth = 40f; ile.preferredHeight = 40f;
+
+                var num = UiKit.Text(bar, "Num_" + id, "0", 28, TextAlignmentOptions.Left);
+                var nle = num.gameObject.AddComponent<LayoutElement>();
+                nle.minWidth = 36f; nle.preferredHeight = 40f;
+                _bank[id] = num;
+            }
+        }
+
+        void BuildTooltip()
+        {
+            _tooltip = UiKit.Rect(_root, "Tooltip");
+            _tooltip.anchorMin = _tooltip.anchorMax = new Vector2(0.5f, 0.5f);
+            _tooltip.pivot = new Vector2(0f, 0.5f);
+            _tooltip.sizeDelta = new Vector2(400f, 280f);
+
+            var border = UiKit.Image(_tooltip, "Border", ColBorder, UiArt.RoundRectFill);
+            border.type = Image.Type.Sliced;
+            UiKit.Stretch(border.rectTransform);
+            var panel = UiKit.Image(_tooltip, "Panel", ColPanel, UiArt.RoundRectFill);
+            panel.type = Image.Type.Sliced;
+            UiKit.Stretch(panel.rectTransform);
+            panel.rectTransform.offsetMin = new Vector2(2f, 2f);
+            panel.rectTransform.offsetMax = new Vector2(-2f, -2f);
+
+            // 노드를 가리키는 꼬리 (테두리 색 삼각형 위에 판 색 삼각형)
+            _tipArrow = UiKit.Image(_tooltip, "Arrow", ColBorder, UiArt.TriangleLeft);
+            var inner = UiKit.Image(_tipArrow.transform, "In", ColPanel, UiArt.TriangleLeft);
+            UiKit.Place(inner.rectTransform, new Vector2(0.5f, 0.5f), new Vector2(3f, 0f), new Vector2(22f, 22f));
+
+            _tipCat = TipText("Category", 21, new Vector2(28f, -18f), new Vector2(344f, 28f));
+            _tipName = TipText("Name", 34, new Vector2(28f, -46f), new Vector2(344f, 44f));
+            _tipName.fontStyle = FontStyles.Bold;
+            TipLine(-100f);
+            _tipBody = TipText("Body", 21, new Vector2(28f, -114f), new Vector2(344f, 62f));
+            _tipBody.textWrappingMode = TextWrappingModes.Normal;
+            _tipDiv2 = TipLine(-184f);
+
+            _tipCostRow = UiKit.Rect(_tooltip, "CostRow");
+            _tipCostRow.anchorMin = _tipCostRow.anchorMax = new Vector2(0f, 1f);
+            _tipCostRow.pivot = new Vector2(0f, 1f);
+            _tipCostRow.anchoredPosition = new Vector2(28f, -198f);
+            _tipCostRow.sizeDelta = new Vector2(344f, 36f);
+            _tipCostIcon = UiKit.Image(_tipCostRow, "Icon", Color.white);
+            _tipCostIcon.preserveAspect = true;
+            Corner(_tipCostIcon.rectTransform, new Vector2(0f, 0.5f), Vector2.zero, new Vector2(34f, 34f));
+            _tipCostIcon.rectTransform.pivot = new Vector2(0f, 0.5f);
+            _tipCost = UiKit.Text(_tipCostRow, "Cost", "", 26, TextAlignmentOptions.Left);
+            Corner(_tipCost.rectTransform, new Vector2(0f, 0.5f), new Vector2(46f, 0f), new Vector2(290f, 34f));
+            _tipCost.rectTransform.pivot = new Vector2(0f, 0.5f);
+
+            _tipStatus = TipText("Status", 20, new Vector2(28f, -238f), new Vector2(344f, 28f));
+            _tipStatus.color = ColMuted;
+
+            _tooltip.gameObject.SetActive(false);
+        }
+
+        TextMeshProUGUI TipText(string name, float size, Vector2 pos, Vector2 box)
+        {
+            var t = UiKit.Text(_tooltip, name, "", size, TextAlignmentOptions.TopLeft);
+            Corner(t.rectTransform, new Vector2(0f, 1f), pos, box);
+            return t;
+        }
+
+        RectTransform TipLine(float y)
+        {
+            var l = UiKit.Image(_tooltip, "Line", new Color(1f, 1f, 1f, 0.12f));
+            var rt = l.rectTransform;
+            rt.anchorMin = new Vector2(0f, 1f); rt.anchorMax = new Vector2(1f, 1f);
+            rt.pivot = new Vector2(0.5f, 1f);
+            rt.offsetMin = new Vector2(28f, y - 1.5f); rt.offsetMax = new Vector2(-28f, y);
+            return rt;
+        }
+
+        static void Corner(RectTransform rt, Vector2 anchor, Vector2 pos, Vector2 size)
+        {
+            rt.anchorMin = rt.anchorMax = anchor;
+            rt.pivot = anchor;
+            rt.anchoredPosition = pos;
+            rt.sizeDelta = size;
+        }
+
+        void BuildButtons()
+        {
+            // 왼쪽 아래 — 테두리만 있는 버튼들
+            var center = OutlineButton("CenterButton", "중앙 정렬", UiArt.Crosshair, new Vector2(44f, 36f), new Vector2(200f, 62f));
+            center.onClick.AddListener(Recenter);
+
+            var prev = OutlineButton("PreviewToggle", "[테스트] 미리보기", null, new Vector2(262f, 36f), new Vector2(240f, 62f));
+            _previewLabel = prev.GetComponentInChildren<TextMeshProUGUI>();
+            prev.onClick.AddListener(() => SetPreview(!_previewOn, true));
+
+            var back = OutlineButton("BackButton", "마을로 (Esc)", null, new Vector2(522f, 36f), new Vector2(200f, 62f));
+            back.onClick.AddListener(Close);
+
+            // 오른쪽 아래 — 금색 [시작 ›] — 마을을 거치지 않고 바로 던전으로
+
+            var startImg = UiKit.Image(_root, "StartButton", new Color(1f, 0.80f, 0.40f, 1f), UiArt.GradientButton, true);
+            startImg.type = Image.Type.Sliced;
+            Corner(startImg.rectTransform, new Vector2(1f, 0f), new Vector2(-44f, 36f), new Vector2(250f, 68f));
+            var start = startImg.gameObject.AddComponent<Button>();
+            var c = start.colors; c.highlightedColor = new Color(1.1f, 1.1f, 1.1f); c.pressedColor = new Color(0.85f, 0.85f, 0.85f); start.colors = c;
+            var st = UiKit.Text(startImg.transform, "Label", "시작  ›", 32);
+            UiKit.Stretch(st.rectTransform);
+            st.fontStyle = FontStyles.Bold;
+            st.color = new Color(0.20f, 0.12f, 0.05f, 1f);
+            start.onClick.AddListener(() =>
+            {
+                if (iris != null) iris.Play(() => { Close(); run.Restart(); });
+                else { Close(); run.Restart(); }
+            });
+        }
+
+        Button OutlineButton(string name, string label, Sprite icon, Vector2 pos, Vector2 size)
+        {
+            var fill = UiKit.Image(_root, name, new Color(0.10f, 0.08f, 0.15f, 0.85f), UiArt.RoundRectFill, true);
+            fill.type = Image.Type.Sliced;
+            Corner(fill.rectTransform, new Vector2(0f, 0f), pos, size);
+            var outline = UiKit.Image(fill.transform, "Outline", new Color(0.55f, 0.50f, 0.66f, 0.9f), UiArt.RoundRectOutline);
+            outline.type = Image.Type.Sliced;
+            UiKit.Stretch(outline.rectTransform);
+            var b = fill.gameObject.AddComponent<Button>();
+            var c = b.colors; c.highlightedColor = new Color(1.3f, 1.3f, 1.3f); b.colors = c;
+
+            float x = 22f;
+            if (icon != null)
+            {
+                var ic = UiKit.Image(fill.transform, "Icon", new Color(0.85f, 0.83f, 0.92f, 1f), icon);
+                Corner(ic.rectTransform, new Vector2(0f, 0.5f), new Vector2(18f, 0f), new Vector2(30f, 30f));
+                ic.rectTransform.pivot = new Vector2(0f, 0.5f);
+                x = 62f;
+            }
+            var t = UiKit.Text(fill.transform, "Label", label, 22, TextAlignmentOptions.Left);
+            Corner(t.rectTransform, new Vector2(0f, 0.5f), new Vector2(x, 0f), new Vector2(size.x - x - 10f, 40f));
+            t.rectTransform.pivot = new Vector2(0f, 0.5f);
+            t.color = new Color(0.92f, 0.90f, 0.96f, 1f);
+            return b;
+        }
+
+        // ───────────────────────────── 상태 ─────────────────────────────
+
+        void Refresh()
+        {
+            var prog = run.Progression;
+            foreach (var v in _views.Values)
+            {
+                var n = v.Data;
+                int lv = prog.Level(n.Id);
+                bool unlocked = prog.IsUnlocked(n);
+                bool maxed = prog.IsMaxed(n);
+                bool afford = prog.CanBuy(n, run.Bank);
+
+                v.Lock.SetActive(!unlocked);
+                v.Ring.color = !unlocked ? ColSteel : afford ? ColGoldHot : lv > 0 ? ColGold : ColGoldDim;
+                v.Art.color = !unlocked ? new Color(0.36f, 0.34f, 0.42f, 1f)
+                            : (lv > 0 || afford) ? Color.white : new Color(0.78f, 0.78f, 0.80f, 1f);
+                v.Icon.color = unlocked ? Color.white : new Color(1f, 1f, 1f, 0.3f);
+
+                if (!unlocked) v.Label.text = "";
+                else if (n.MaxLevel > 1) v.Label.text = maxed ? "<color=#ffd873>MAX</color>" : $"{lv}/{n.MaxLevel}";
+                else v.Label.text = lv > 0 ? "<color=#ffd873>습득</color>" : "";
+
+                bool lit = n.Requires.Length == 0 || unlocked;
+                foreach (var e in v.InEdges) e.color = lit ? ColEdgeOn : ColEdgeOff;
+            }
+
+            foreach (var kv in _bank) kv.Value.text = run.Bank.Get(kv.Key).ToString();
+            if (_hover != null) ShowTip(_hover);
+        }
+
+        void Update()
+        {
+            if (!IsOpen) return;
+            var kb = Keyboard.current;
+            if (kb != null && kb.escapeKey.wasPressedThisFrame && (iris == null || !iris.Busy)) { Close(); return; }
+            // 살 수 있는 노드는 은은하게 숨 쉰다 — 어디를 눌러야 하는지 한눈에 보인다
+            float pulse = 0.28f + 0.2f * Mathf.Sin(Time.unscaledTime * 4f);
+            foreach (var v in _views.Values)
+            {
+                var g = v.Glow.color;
+                g.a = run.Progression.CanBuy(v.Data, run.Bank) ? pulse : 0f;
+                v.Glow.color = g;
+            }
+        }
+
+        void TryBuy(NodeView v)
+        {
+            if (!run.Progression.Buy(v.Data, run.Bank)) { StartCoroutine(Shake(v.Root)); return; }
+            StartCoroutine(Pop(v.Root));
+        }
+
+        IEnumerator Pop(RectTransform rt)
+        {
+            float t = 0f;
+            while (t < 0.25f)
+            {
+                t += Time.unscaledDeltaTime;
+                float k = t / 0.25f;
+                rt.localScale = Vector3.one * (1f + 0.22f * Mathf.Sin(k * Mathf.PI) * (1f - k * 0.5f));
+                yield return null;
+            }
+            rt.localScale = Vector3.one;
+        }
+
+        IEnumerator Shake(RectTransform rt)
+        {
+            Vector2 p0 = rt.anchoredPosition;
+            float t = 0f;
+            while (t < 0.22f)
+            {
+                t += Time.unscaledDeltaTime;
+                rt.anchoredPosition = p0 + new Vector2(Mathf.Sin(t * 70f) * 6f * (1f - t / 0.22f), 0f);
+                yield return null;
+            }
+            rt.anchoredPosition = p0;
+        }
+
+        // ───────────────────────────── 툴팁 ─────────────────────────────
+
+        static (string, Color) Category(string key)
+        {
+            if (string.IsNullOrEmpty(key)) return ("", Color.white);
+            if (key.StartsWith("explore")) return ("탐험", new Color(0.55f, 0.92f, 0.45f));
+            if (key.StartsWith("mine")) return ("채굴", new Color(0.45f, 0.85f, 1f));
+            if (key.StartsWith("combat")) return ("전투", new Color(1f, 0.55f, 0.38f));
+            if (key.StartsWith("hire")) return ("고용", new Color(1f, 0.85f, 0.35f));
+            if (key.StartsWith("skill")) return ("스킬", new Color(0.82f, 0.72f, 1f));
+            return ("", Color.white);
+        }
+
+        void ShowTip(NodeView v)
+        {
+            if (v.Core) return;
+            _hover = v;
+            var n = v.Data;
+            var (cat, catCol) = Category(n.IconKey);
+            _tipCat.text = cat;
+            _tipCat.color = catCol;
+
+            if (v.Preview)
+            {
+                _tipName.text = n.Name;
+                _tipBody.text = n.Effect;
+                _tipCostRow.gameObject.SetActive(false);
+                _tipStatus.text = "미리보기 · 아직 구현되지 않은 노드";
+                _tipStatus.color = ColMuted;
+                PlaceTip(v);
+                return;
+            }
+
+            var prog = run.Progression;
+            int lv = prog.Level(n.Id);
+            bool maxed = prog.IsMaxed(n);
+            bool unlocked = prog.IsUnlocked(n);
+
+            _tipName.text = n.MaxLevel > 1
+                ? $"{n.Name}   <size=22><color=#9a94ab>Lv. {lv} / {n.MaxLevel}</color></size>"
+                : n.Name;
+
+            string body = n.Effect;
+            if (n.Total != null && n.MaxLevel > 1)
+                body += "\n<size=18><color=#9a94ab>" + (maxed ? "현재 " + n.Total(lv) : $"{n.Total(lv)}  →  {n.Total(lv + 1)}") + "</color></size>";
+            _tipBody.text = body;
+
+            if (maxed)
+            {
+                _tipCostRow.gameObject.SetActive(false);
+                _tipStatus.text = "최대 레벨";
+                _tipStatus.color = ColGold;
+            }
+            else
+            {
+                _tipCostRow.gameObject.SetActive(true);
+                int have = run.Bank.Get(n.Cost), need = prog.NextCost(n);
+                bool enough = have >= need;
+                _tipCostIcon.sprite = Resources.Load<Sprite>("Icons/res_" + n.Cost.ToString().ToLowerInvariant());
+                _tipCost.text = $"<color={(enough ? "#9fe8a6" : "#ff6b6b")}>{have} / {need}</color>";
+
+                if (!unlocked)
+                {
+                    var req = new System.Text.StringBuilder();
+                    foreach (var r in n.Requires) req.Append(Progression.Find(r).Name).Append(' ');
+                    _tipStatus.text = "선행 노드 필요: " + req.ToString().Trim();
+                    _tipStatus.color = new Color(1f, 0.55f, 0.5f);
+                }
+                else if (!enough)
+                {
+                    _tipStatus.text = "자원이 부족합니다";
+                    _tipStatus.color = ColMuted;
+                }
+                else
+                {
+                    _tipStatus.text = "클릭해서 배우기";
+                    _tipStatus.color = new Color(0.62f, 0.92f, 0.66f);
+                }
+            }
+            PlaceTip(v);
+        }
+
+        /// <summary>노드 오른쪽에 띄운다. 화면 밖으로 나가면 왼쪽으로 뒤집는다.</summary>
+        void PlaceTip(NodeView v)
+        {
+            _tooltip.gameObject.SetActive(true);
+            _tooltip.SetAsLastSibling();
+
+            float half = v.Root.rect.width * 0.5f * v.Root.lossyScale.x / Mathf.Max(0.0001f, _root.lossyScale.x);
+            Vector2 center;
+            RectTransformUtility.ScreenPointToLocalPointInRectangle(_root,
+                RectTransformUtility.WorldToScreenPoint(null, v.Root.position), null, out center);
+
+            float gap = 22f;
+            bool flip = center.x + half + gap + _tooltip.sizeDelta.x > _root.rect.width * 0.5f - 20f;
+            _tooltip.pivot = new Vector2(flip ? 1f : 0f, 0.5f);
+            _tooltip.anchoredPosition = center + new Vector2(flip ? -(half + gap) : (half + gap), 0f);
+
+            // 위아래로 넘치지 않게
+            var p = _tooltip.anchoredPosition;
+            float hh = _tooltip.sizeDelta.y * 0.5f, lim = _root.rect.height * 0.5f - 20f;
+            p.y = Mathf.Clamp(p.y, -lim + hh, lim - hh);
+            _tooltip.anchoredPosition = p;
+
+            // 꼬리는 노드 쪽 가장자리, 노드 높이에 맞춘다
+            var art = _tipArrow.rectTransform;
+            art.anchorMin = art.anchorMax = new Vector2(flip ? 1f : 0f, 0.5f);
+            art.sizeDelta = new Vector2(26f, 26f);
+            art.anchoredPosition = new Vector2(flip ? 11f : -11f, Mathf.Clamp(center.y - p.y, -hh + 24f, hh - 24f));
+            art.localRotation = Quaternion.Euler(0f, 0f, flip ? 180f : 0f);
+        }
+
+        void HideTip()
+        {
+            _hover = null;
+            if (_tooltip != null) _tooltip.gameObject.SetActive(false);
+        }
+
+        // ───────────────────────────── 이동 · 확대 ─────────────────────────────
+
+        void Recenter()
+        {
+            StopAllCoroutines();
+            StartCoroutine(Glide(_previewOn ? new Vector2(0f, 60f) : homeOffset, _previewOn ? 0.3f : 1f));
+        }
+
+        IEnumerator Glide(Vector2 to, float zoom)
+        {
+            HideTip();
+            Vector2 from = _content.anchoredPosition;
+            float z0 = _zoom, t = 0f;
+            while (t < 0.3f)
+            {
+                t += Time.unscaledDeltaTime;
+                float k = 1f - Mathf.Pow(1f - Mathf.Clamp01(t / 0.3f), 3f);
+                _content.anchoredPosition = Vector2.Lerp(from, to, k);
+                _zoom = Mathf.Lerp(z0, zoom, k);
+                _content.localScale = Vector3.one * _zoom;
+                yield return null;
+            }
+        }
+
+        internal void OnDragged(Vector2 screenDelta)
+        {
+            HideTip();
+            float s = _canvas != null ? _canvas.scaleFactor : 1f;
+            _content.anchoredPosition += screenDelta / s;
+        }
+
+        internal void OnScrolled(Vector2 screenPos, float delta)
+        {
+            if (Mathf.Abs(delta) < 0.01f) return;
+            HideTip();
+            float newZoom = Mathf.Clamp(_zoom * (delta > 0 ? 1.12f : 1f / 1.12f), MinZoom, maxZoom);
+            RectTransformUtility.ScreenPointToLocalPointInRectangle(_content, screenPos, null, out var before);
+            _zoom = newZoom;
+            _content.localScale = Vector3.one * _zoom;
+            RectTransformUtility.ScreenPointToLocalPointInRectangle(_content, screenPos, null, out var after);
+            _content.anchoredPosition += (after - before) * _zoom;
+        }
+
+        // ───────────────────────────── 미리보기 (테스트용) ─────────────────────────────
+
+        /// <summary>
+        /// 기획서의 전체 노드 중 아직 게임에 없는 것들. 테스트용 미리보기로만 그린다 — 살 수 없다.
+        /// 갈래: E 탐험(위) · M 채굴(오른쪽) · C 전투(왼쪽) · H 고용(아래). 마지막 칸 1 = 핵심 노드.
+        /// </summary>
+        static readonly string[][] PreviewData =
+        {
+            new[] { "E", "절약", "피로도 소모 속도 −5% (I~V)", "explore_thrift", "0" },
+            new[] { "E", "순발력", "이동 반응 속도 증가 (I~III)", "explore_quickness", "0" },
+            new[] { "E", "예감", "인접 방의 유형 표시", "explore_premonition", "0" },
+            new[] { "E", "경로 예측", "보스방까지의 최단 경로를 미니맵에 표시", "explore_path_foresight", "0" },
+            new[] { "E", "지도", "방 배치 전체를 입장 시부터 공개", "explore_full_map", "0" },
+            new[] { "E", "지름길", "클리어한 층의 중간 지점부터 시작 가능", "explore_shortcut", "1" },
+            new[] { "E", "야영", "던전당 1회, 피로도 30% 회복", "explore_camp", "0" },
+            new[] { "E", "귀환석", "언제든 즉시 귀환, 획득물 확정", "explore_return_stone", "0" },
+            new[] { "E", "문 열림", "봉인된 방 진입 비용 감소", "explore_open_doors", "0" },
+            new[] { "E", "질주 (스킬)", "4초간 이동 속도 +60%, 피로도 소모 절반", "skill_sprint", "0" },
+            new[] { "E", "두 번째 바람", "피로도 20% 이하에서 이속 +30%, 소모 −20%", "explore_second_wind", "0" },
+            new[] { "E", "심층 적응", "깊은 방일수록 피로도 소모 감소", "explore_deep_adaptation", "0" },
+            new[] { "E", "광부의 직감", "상급 광맥이 있는 경로 표시", "explore_miners_instinct", "0" },
+
+            new[] { "M", "수확", "채굴 시 자원량 +1 (I~V)", "mine_harvest", "0" },
+            new[] { "M", "정밀", "상급 자원 산출 확률 +5% (I~III)", "mine_precision", "0" },
+            new[] { "M", "집중", "채굴 중 피격 시 진행도 유지 (I~III)", "mine_focus", "0" },
+            new[] { "M", "광맥 감지", "방 안 광맥 위치를 벽 너머로 표시", "mine_vein_sense", "0" },
+            new[] { "M", "감정안", "캐기 전에 정확한 산출량 표시", "mine_appraisal", "0" },
+            new[] { "M", "자기장", "캔 자원이 자동으로 끌려옴", "mine_magnetism", "0" },
+            new[] { "M", "즉시 채굴", "하급 광맥은 시간 없이 즉시 획득", "mine_instant_mining", "0" },
+            new[] { "M", "연쇄 채굴", "인접한 광맥을 동시에 캠", "mine_chain_mining", "0" },
+            new[] { "M", "광맥 파쇄 (스킬)", "광맥 하나를 즉시 캔다, 산출량 −50%", "skill_ore_shatter", "0" },
+            new[] { "M", "이중 수확", "10% 확률로 산출량 2배", "mine_double_harvest", "0" },
+            new[] { "M", "전투 채굴", "전투 중에도 채굴 가능 (속도 절반)", "mine_combat_mining", "1" },
+            new[] { "M", "잔향", "방 클리어 시 남은 광맥 1개 자동 채굴", "mine_echo", "0" },
+            new[] { "M", "심층 광맥", "깊은 방에서 광맥 1개 추가 생성", "mine_deep_vein", "0" },
+
+            new[] { "C", "수련", "스킬 포인트 +1 (I~XX)", "combat_training", "0" },
+            new[] { "C", "치명", "치명타 확률 +3% (I~V)", "combat_critical", "0" },
+            new[] { "C", "속공", "공격 속도 +6% (I~III)", "combat_swiftness", "0" },
+            new[] { "C", "강인함", "최대 HP +10% (I~III)", "combat_toughness", "0" },
+            new[] { "C", "회피", "무적 프레임 +2 (I~III)", "combat_evasion", "0" },
+            new[] { "C", "내려찍기 (스킬)", "전방 원 충격파, 넘어뜨림", "skill_ground_slam", "0" },
+            new[] { "C", "회전베기 (스킬)", "주변 360° 3회 타격", "skill_whirlwind", "0" },
+            new[] { "C", "연속 찌르기 (스킬)", "전방 5연타, 경직 유지", "skill_rapid_thrusts", "0" },
+            new[] { "C", "캔슬", "공격 후딜을 끊을 수 있음", "combat_cancel", "0" },
+            new[] { "C", "선입력", "입력 버퍼 증가 — 커맨드가 덜 씹힘", "combat_input_buffer", "0" },
+            new[] { "C", "공중 콤보", "띄운 적을 공중에서 이어칠 수 있음", "combat_air_combo", "0" },
+            new[] { "C", "슈퍼아머", "강공격 중 경직 면역", "combat_super_armor", "0" },
+            new[] { "C", "검기 날리기 (스킬)", "관통하는 초승달 검기", "skill_sword_wave", "0" },
+            new[] { "C", "발도술 (스킬)", "칼집에서 순간 베기, 그로기 대상 ×2", "skill_iaido", "1" },
+            new[] { "C", "반격 자세 (스킬)", "0.5초 자세, 맞으면 무효 + 반격", "skill_counter_stance", "0" },
+            new[] { "C", "전투 함성 (스킬)", "10초간 공격 속도 +20%", "skill_war_cry", "0" },
+            new[] { "C", "반격", "완벽 회피 직후 공격력 2배", "combat_riposte", "0" },
+            new[] { "C", "처형", "HP 20% 이하 적 즉사", "combat_execute", "0" },
+            new[] { "C", "연쇄", "처치 시 주변 적에게 피해", "combat_chain_strike", "0" },
+            new[] { "C", "흡혈", "처치 시 HP 소량 회복", "combat_life_drain", "0" },
+            new[] { "C", "전리품", "몬스터 자원 획득량 +20%", "combat_spoils", "0" },
+            new[] { "C", "엘리트 사냥", "엘리트 처치 시 핵 확정", "combat_elite_hunter", "0" },
+            new[] { "C", "대지 가르기 (궁극기)", "전방 일직선으로 땅을 가른다", "skill_earth_splitter", "1" },
+            new[] { "C", "섬멸", "방의 마지막 적 처치 시 피로도 소량 회복", "combat_annihilation", "1" },
+            new[] { "C", "무아지경", "노히트 클리어 시 피로도 소모 5초 정지", "combat_trance", "0" },
+
+            new[] { "H", "채광 알바", "지정한 광맥을 대신 캔다", "hire_miner_helper", "0" },
+            new[] { "H", "전투 알바", "따라다니며 몬스터와 싸운다", "hire_fighter_helper", "0" },
+            new[] { "H", "운반 알바", "바닥의 자원을 자동으로 주워 온다", "hire_porter_helper", "0" },
+            new[] { "H", "정찰 알바", "인접 방의 내용을 미리 가져온다", "hire_scout_helper", "0" },
+            new[] { "H", "위생병 알바", "플레이어 HP를 천천히 회복", "hire_medic_helper", "0" },
+            new[] { "H", "고용 인원", "동행 인원 +1 (I~V)", "hire_headcount", "0" },
+            new[] { "H", "숙련", "알바 작업 속도 +15% (I~V)", "hire_expertise", "0" },
+            new[] { "H", "알바 체력", "알바 HP +25% (I~III)", "hire_helper_vitality", "0" },
+            new[] { "H", "급여 협상", "알바 유지 골드 비용 −20% (I~III)", "hire_wage_deal", "0" },
+            new[] { "H", "지시", "알바에게 우선 작업을 지정", "hire_orders", "0" },
+            new[] { "H", "자율", "알바가 스스로 가까운 광맥을 찾아 캔다", "hire_autonomy", "1" },
+            new[] { "H", "교대", "쓰러진 알바가 일정 시간 후 복귀", "hire_shift_swap", "0" },
+            new[] { "H", "팀워크", "알바가 캔 자원 +15%", "hire_teamwork", "0" },
+            new[] { "H", "호위 대형", "알바가 피해 일부를 대신 받음", "hire_escort_formation", "0" },
+            new[] { "H", "작업 감독", "플레이어 전투 중 알바 속도 +30%", "hire_work_supervisor", "0" },
+            new[] { "H", "2교대", "다음 방으로 가도 알바가 이전 방에서 계속 작업", "hire_two_shifts", "1" },
+            new[] { "H", "자동 편성", "입장 시 최적 알바 조합 자동 선택", "hire_auto_roster", "0" },
+            new[] { "H", "길드", "알바 인원 상한 +3", "hire_guild", "0" },
+        };
+
+        /// <summary>
+        /// 갈래별로 줄지어 배치한다. 위·아래 갈래는 좌우 2칸, 좌·우 갈래는 위아래 4칸.
+        /// 가운데 축은 실제 노드 자리로 비워 둔다.
+        /// </summary>
+        void BuildPreview()
+        {
+            _preview = UiKit.Rect(_content, "Preview");
+            _preview.SetSiblingIndex(0);   // 실제 노드 아래에 깔린다
+            var edges = UiKit.Rect(_preview, "Edges");
+            var nodes = UiKit.Rect(_preview, "Nodes");
+
+            var count = new Dictionary<string, int>();
+            foreach (var d in PreviewData)
+            {
+                string br = d[0];
+                count.TryGetValue(br, out int i);
+                count[br] = i + 1;
+
+                Vector2 dir, side; float start; float[] slots;
+                switch (br)
+                {
+                    case "E": dir = Vector2.up; side = Vector2.right; start = 150f; slots = new[] { -150f, 150f }; break;
+                    case "H": dir = Vector2.down; side = Vector2.right; start = 150f; slots = new[] { -150f, 150f }; break;
+                    case "M": dir = Vector2.right; side = Vector2.up; start = 340f; slots = new[] { -150f, 150f, -300f, 300f }; break;
+                    default: dir = Vector2.left; side = Vector2.up; start = 340f; slots = new[] { -150f, 150f, -300f, 300f }; break;
+                }
+                int row = i / slots.Length;
+                float along = start + row * 150f;
+                Vector2 pos = (dir * along + side * slots[i % slots.Length]) * Spread;
+                Vector2 anchor = dir * (along - 150f) * Spread;   // 앞 줄의 축 지점에서 뻗는다
+
+                var e = Edge(edges, anchor, pos, 4f);
+                e.color = ColEdgeOff * new Color(1f, 1f, 1f, 0.7f);
+
+                bool key = d[4] == "1";
+                var v = MakeNode(nodes, "Preview_" + d[1], pos, key ? PreviewKeySize : PreviewSize);
+                v.Preview = true;
+                v.Data = new UpgradeNode { Name = d[1], Effect = d[2], MaxLevel = 1, Keystone = key, IconKey = d[3] };
+                v.Icon.text = d[1].Substring(0, 1);
+                SetArt(v, d[3]);
+                v.Ring.color = key ? ColGoldDim : ColSteel;
+                v.Art.color = new Color(0.66f, 0.66f, 0.72f, 1f);
+                v.Label.text = "<color=#8f8aa3>" + d[1] + "</color>";
+                v.Label.fontSize = 17;
+                var captured = v;
+                Hook(v, () => StartCoroutine(Shake(captured.Root)));
+            }
+
+            // 갈래 축 — 줄 사이를 잇는 흐린 선
+            foreach (var kv in count)
+            {
+                Vector2 dir = kv.Key == "E" ? Vector2.up : kv.Key == "H" ? Vector2.down : kv.Key == "M" ? Vector2.right : Vector2.left;
+                int per = (kv.Key == "E" || kv.Key == "H") ? 2 : 4;
+                float start = (kv.Key == "E" || kv.Key == "H") ? 150f : 340f;
+                float end = (start + ((kv.Value - 1) / per - 1) * 150f) * Spread;
+                if (end <= 0f) continue;
+                var e = Edge(edges, Vector2.zero, dir * end, 4f);
+                e.color = ColEdgeOff * new Color(1f, 1f, 1f, 0.7f);
+                e.transform.SetAsFirstSibling();
+            }
+
+            _preview.gameObject.SetActive(false);
+        }
+
+        void SetPreview(bool on, bool glide)
+        {
+            _previewOn = on;
+            _preview.gameObject.SetActive(on);
+            if (_previewLabel != null)
+                _previewLabel.text = on ? "[테스트] 미리보기: 켬" : "[테스트] 미리보기";
+            HideTip();
+            if (!glide) return;
+            StopAllCoroutines();
+            StartCoroutine(Glide(on ? new Vector2(0f, 60f) : homeOffset, on ? 0.3f : 1f));
+        }
+    }
+
+    /// <summary>배경을 끌어 트리를 옮기고, 휠로 확대한다.</summary>
+    public class TreeDragArea : MonoBehaviour, IDragHandler, IScrollHandler
+    {
+        public SkillTreeView View;
+        public void OnDrag(PointerEventData e) => View.OnDragged(e.delta);
+        public void OnScroll(PointerEventData e) => View.OnScrolled(e.position, e.scrollDelta.y);
+    }
+
+    /// <summary>노드 위에 올렸을 때 / 뗐을 때 / 눌렀을 때.</summary>
+    public class TreeNodeHover : MonoBehaviour, IPointerEnterHandler, IPointerExitHandler, IPointerClickHandler, IScrollHandler, IDragHandler
+    {
+        public Action Enter, Exit, Click;
+        public void OnPointerEnter(PointerEventData e) => Enter?.Invoke();
+        public void OnPointerExit(PointerEventData e) => Exit?.Invoke();
+        public void OnPointerClick(PointerEventData e) { if (!e.dragging) Click?.Invoke(); }
+
+        // 노드 위에서도 휠과 드래그가 먹도록 배경으로 넘긴다
+        public void OnScroll(PointerEventData e) => ExecuteEvents.ExecuteHierarchy(transform.root.GetComponentInChildren<TreeDragArea>().gameObject, e, ExecuteEvents.scrollHandler);
+        public void OnDrag(PointerEventData e) => ExecuteEvents.ExecuteHierarchy(transform.root.GetComponentInChildren<TreeDragArea>().gameObject, e, ExecuteEvents.dragHandler);
+    }
+}

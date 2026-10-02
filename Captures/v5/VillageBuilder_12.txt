@@ -1,0 +1,526 @@
+#if UNITY_EDITOR
+using System.Collections.Generic;
+using UnityEditor;
+using UnityEngine;
+using TMPro;
+using Proto.Data;
+using Proto.Town;
+
+namespace Proto.EditorTools
+{
+    /// <summary>
+    /// 마을을 짓는다. ProtoSceneBuilder가 부른다.
+    ///
+    ///   무사 마을 — 노을 진 일본식 마을. 카타나·발도술 주인공과 결을 맞췄다.
+    ///
+    ///   뒤      흰 담장 · 일본식 집 · 멀리 천수각 · 가운데 붉은 도리이(던전 입구, 보라색 소용돌이)
+    ///   왼쪽    성장 관리인 — 분재와 서가
+    ///   오른쪽  스킬 관리인 (검객) — 카타나 거치대
+    ///   가운데  자갈 마당, 카메라 쪽에서 올라오는 돌길과 초롱
+    ///   양옆    대나무 숲
+    ///
+    /// 던전 아레나와 같은 자리(원점)에 겹쳐 짓는다. 카메라를 옮기지 않기 위해서다.
+    /// 에셋 크기가 제각각이라 놓을 때마다 실제 크기를 재서 원하는 높이로 맞춘다.
+    /// </summary>
+    public static class VillageBuilder
+    {
+        const string T = "Assets/polyperfect/Low Poly Ultimate Pack/T/- Prefabs_T/";
+        const string J = T + "Japan_T/";
+        const string People = "Assets/polyperfect/Low Poly Animated People/- Prefabs/";
+        const string PlayerController = "Assets/_Project/Animation/Player.controller";
+
+        public class Result
+        {
+            public GameObject World;
+            public Transform Spawn;
+            public VillageNpc[] Npcs;
+            public VillageGate Gate;
+        }
+
+        // 걸어 다닐 수 있는 범위 (아레나와 같다)
+        const float HalfX = 10.4f, Front = -5.2f, Back = 4.7f;
+
+        public static Result Build(Transform parent, StageTheme theme)
+        {
+            var world = new GameObject("VillageWorld");
+            world.transform.SetParent(parent, false);
+            var w = world.transform;
+            var res = new Result { World = world };
+
+            Ground(w, theme);
+            Paths(w);
+            WalkBounds(w);
+
+            res.Gate = Gate(w);
+            Backdrop(w);
+            Decor(w, theme);
+
+            var ctrl = AssetDatabase.LoadAssetAtPath<RuntimeAnimatorController>(PlayerController);
+            res.Npcs = new[]
+            {
+                Npc(w, "man_wizard", new Vector3(-6.6f, 0f, 1.2f), 160f, NpcRole.Growth,
+                    "성장 관리", "장로 하른", new Color(0.55f, 0.85f, 0.45f), ctrl),
+                Npc(w, "man_ninja", new Vector3(6.6f, 0f, 1.2f), 200f, NpcRole.Skill,
+                    "스킬 관리", "검객 시로", new Color(1f, 0.55f, 0.35f), ctrl),
+            };
+
+            var spawn = new GameObject("Spawn").transform;
+            spawn.SetParent(w, false);
+            spawn.localPosition = new Vector3(0f, 0f, 2.2f);   // 문 바로 앞 — 던전에서 막 나온 자리
+            res.Spawn = spawn;
+            return res;
+        }
+
+        // ───────────────────────────── 땅 · 길 ─────────────────────────────
+
+        static void Ground(Transform w, StageTheme theme)
+        {
+            var g = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            g.name = "Ground";
+            g.transform.SetParent(w, false);
+            g.transform.localScale = new Vector3(44f, 0.5f, 44f);
+            g.transform.localPosition = new Vector3(0f, -0.25f, 0f);   // 카메라 쪽 끝이 화면에 걸리지 않게 앞으로 넉넉히
+            var r = g.GetComponent<Renderer>();
+            if (theme != null && theme.groundMaterial != null)
+            {
+                const string path = "Assets/_Project/Materials/VillageGround.mat";
+                var m = AssetDatabase.LoadAssetAtPath<Material>(path);
+                if (m == null) { m = new Material(theme.groundMaterial); AssetDatabase.CreateAsset(m, path); }
+                else m.CopyPropertiesFromMaterial(theme.groundMaterial);
+                float tile = Mathf.Max(0.5f, theme.groundTileSize);
+                m.SetTextureScale("_BaseMap", new Vector2(44f / tile, 44f / tile));
+                EditorUtility.SetDirty(m);
+                r.sharedMaterial = m;
+            }
+            else Tint(g, new Color(0.36f, 0.48f, 0.28f));
+        }
+
+        static void Paths(Transform w)
+        {
+            // 자갈 마당 — NPC 둘과 도리이를 하나로 묶는다
+            Slab(w, "Courtyard", new Vector3(0f, 0.012f, 1.0f), new Vector3(19f, 0.04f, 7f), new Color(0.80f, 0.74f, 0.62f));
+            Slab(w, "CourtyardEdge", new Vector3(0f, 0.006f, 1.0f), new Vector3(19.4f, 0.04f, 7.4f), new Color(0.58f, 0.52f, 0.44f));
+            // 카메라 쪽에서 올라오는 돌길과 디딤돌
+            Slab(w, "PathMain", new Vector3(0f, 0.015f, -3.0f), new Vector3(2.8f, 0.04f, 6.5f), new Color(0.62f, 0.58f, 0.52f));
+            for (int i = 0; i < 5; i++)
+                Slab(w, "Step", new Vector3(0f, 0.03f, -5.6f + i * 1.2f), new Vector3(2.2f, 0.05f, 0.8f), new Color(0.52f, 0.50f, 0.46f));
+        }
+
+        static void Slab(Transform w, string name, Vector3 pos, Vector3 size, Color c)
+        {
+            var s = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            s.name = name;
+            s.transform.SetParent(w, false);
+            s.transform.localPosition = pos;
+            s.transform.localScale = size;
+            Object.DestroyImmediate(s.GetComponent<Collider>());
+            Tint(s, c);
+        }
+
+        static void Disc(Transform w, string name, Vector3 pos, float radius, Color c)
+        {
+            var s = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
+            s.name = name;
+            s.transform.SetParent(w, false);
+            s.transform.localPosition = pos;
+            s.transform.localScale = new Vector3(radius * 2f, 0.02f, radius * 2f);
+            Object.DestroyImmediate(s.GetComponent<Collider>());
+            Tint(s, c);
+        }
+
+        /// <summary>보이지 않는 벽. 아레나와 같은 범위만 걸어 다닌다.</summary>
+        static void WalkBounds(Transform w)
+        {
+            var b = new GameObject("Bounds");
+            b.transform.SetParent(w, false);
+            Box(b.transform, new Vector3(-HalfX - 0.2f, 1f, 0f), new Vector3(0.4f, 2f, 14f));
+            Box(b.transform, new Vector3( HalfX + 0.2f, 1f, 0f), new Vector3(0.4f, 2f, 14f));
+            Box(b.transform, new Vector3(0f, 1f, Front - 0.2f), new Vector3(24f, 2f, 0.4f));
+            Box(b.transform, new Vector3(0f, 1f, Back + 0.2f), new Vector3(24f, 2f, 0.4f));
+        }
+
+        static void Box(Transform p, Vector3 pos, Vector3 size)
+        {
+            var go = new GameObject("Wall");
+            go.transform.SetParent(p, false);
+            go.transform.localPosition = pos;
+            var c = go.AddComponent<BoxCollider>();
+            c.size = size;
+        }
+
+        // ───────────────────────────── 문 ─────────────────────────────
+
+        static VillageGate Gate(Transform w)
+        {
+            var root = new GameObject("DungeonGate");
+            root.transform.SetParent(w, false);
+
+            // 붉은 도리이가 던전 입구다. 기둥 사이에 소용돌이를 건다.
+            var gate = Place(root.transform, J + "gate-red-japan.prefab", new Vector3(0f, 0f, 5.4f), 0f, 5.4f);
+            Bounds b = gate != null ? WorldBounds(gate) : new Bounds(new Vector3(0f, 2.7f, 5.4f), new Vector3(5f, 5.4f, 1f));
+
+            float ow = b.size.x * 0.5f, oh = b.size.y * 0.7f;
+            float z = b.center.z + 0.3f;
+            var back = GameObject.CreatePrimitive(PrimitiveType.Quad);
+            back.name = "PortalBack";
+            back.transform.SetParent(root.transform, false);
+            back.transform.position = new Vector3(0f, oh * 0.5f, z + 0.05f);
+            back.transform.localScale = new Vector3(ow, oh, 1f);
+            Object.DestroyImmediate(back.GetComponent<Collider>());
+            back.GetComponent<Renderer>().sharedMaterial = PortalBackMaterial();
+
+            var swirl = GameObject.CreatePrimitive(PrimitiveType.Quad);
+            swirl.name = "PortalSwirl";
+            swirl.transform.SetParent(root.transform, false);
+            float sw = Mathf.Min(ow, oh) * 1.1f;
+            swirl.transform.position = new Vector3(0f, oh * 0.48f, z - 0.02f);
+            swirl.transform.localScale = new Vector3(sw, sw, 1f);
+            Object.DestroyImmediate(swirl.GetComponent<Collider>());
+            swirl.GetComponent<Renderer>().sharedMaterial = PortalSwirlMaterial();
+
+            var lightGo = new GameObject("PortalLight");
+            lightGo.transform.SetParent(root.transform, false);
+            lightGo.transform.position = new Vector3(0f, 1.6f, b.min.z - 0.8f);
+            var l = lightGo.AddComponent<Light>();
+            l.type = LightType.Point;
+            l.color = new Color(0.70f, 0.40f, 1f);
+            l.range = 7f;
+            l.intensity = 2.2f;
+
+            // 도리이 위 간판
+            Label(root.transform, "GateLabel", "<size=70%><color=#c9a6ff>던전 입구</color></size>\n시작의 숲",
+                  new Vector3(0f, b.max.y + 0.7f, b.min.z - 0.3f), 4.2f, Color.white);
+
+            // 걸어 들어가는 판정 — 마당 끝
+            var trig = new GameObject("EnterTrigger");
+            trig.transform.SetParent(root.transform, false);
+            trig.transform.localPosition = new Vector3(0f, 1f, Back - 0.3f);
+            var bc = trig.AddComponent<BoxCollider>();
+            bc.isTrigger = true;
+            bc.size = new Vector3(Mathf.Max(2.4f, ow), 2f, 1.2f);
+            var vg = trig.AddComponent<VillageGate>();
+            Set(vg, "swirl", swirl.transform);
+            Set(vg, "glow", l);
+
+            // 입구 양옆 둥근 등롱
+            foreach (float sx in new[] { -1f, 1f })
+            {
+                var t = Place(root.transform, J + "lantern-sphere.prefab", new Vector3(sx * 3.3f, 0f, 4.4f), 0f, 1.6f);
+                if (t == null) continue;
+                Glow(t.transform, new Vector3(sx * 3.3f, 1.2f, 4.2f), 3.5f, 1.4f);
+            }
+            return vg;
+        }
+
+        static void Glow(Transform parent, Vector3 pos, float range, float intensity)
+        {
+            var fl = new GameObject("Flame");
+            fl.transform.SetParent(parent, false);
+            fl.transform.position = pos;
+            var pl = fl.AddComponent<Light>();
+            pl.type = LightType.Point;
+            pl.color = new Color(1f, 0.6f, 0.3f);
+            pl.range = range;
+            pl.intensity = intensity;
+        }
+
+        // ───────────────────────────── 배경 ─────────────────────────────
+
+        static void Backdrop(Transform w)
+        {
+            // 도리이 뒤로 천수각, 양옆으로 일본식 집
+            Place(w, J + "castle-japan.prefab", new Vector3(0f, 0f, 24f), 0f, 12f);
+            Place(w, J + "building-japan_large.prefab", new Vector3(-10.5f, 0f, 13f), 15f, 6f);
+            Place(w, J + "building-japan.prefab", new Vector3(10.5f, 0f, 12.5f), -15f, 5.5f);
+
+            // 마당을 두르는 흰 담장 (도리이 자리는 비운다)
+            for (int side = -1; side <= 1; side += 2)
+                for (int i = 0; i < 5; i++)
+                    Place(w, J + "wall-japan_medium.prefab", new Vector3(side * (4.2f + i * 3.3f), 0f, 7.4f), 0f, 2.2f);
+
+            // 담장 앞 단풍나무
+            Place(w, J + "japan-tree-tall.prefab", new Vector3(-6.2f, 0f, 6.4f), 0f, 5.5f);
+            Place(w, J + "japan-tree-tall.prefab", new Vector3(6.4f, 0f, 6.6f), 90f, 5f);
+        }
+
+        static void Decor(Transform w, StageTheme theme)
+        {
+            // 돌길 양옆 초롱
+            for (int side = -1; side <= 1; side += 2)
+                for (int i = 0; i < 2; i++)
+                {
+                    var p = new Vector3(side * 2.0f, 0f, -4.6f + i * 2.4f);
+                    var t = Place(w, J + "lantern-long.prefab", p, 0f, 1.0f);
+                    if (t != null) Glow(t.transform, p + Vector3.up * 1.2f, 3f, 1.2f);
+                }
+
+            // 성장 관리인 — 분재와 서가
+            Place(w, J + "tree-bonsai.prefab", new Vector3(-8.9f, 0f, 2.6f), 0f, 1.6f, true);
+            Place(w, T + "Fantasy_T/library-books.prefab", new Vector3(-8.0f, 0f, 4.0f), 180f, 2.0f, true);
+            Place(w, T + "Fantasy_T/candle-big.prefab", new Vector3(-9.3f, 0f, 1.2f), 0f, 0.4f);
+
+            // 스킬 관리인 — 카타나 거치대
+            Place(w, J + "holder-katana.prefab", new Vector3(8.7f, 0f, 1.8f), 270f, 1.0f, true);
+            Place(w, J + "holder-katana-empty.prefab", new Vector3(8.7f, 0f, 0.4f), 270f, 1.0f, true);
+
+            // 양옆 대나무 숲
+            var rng = new System.Random(5);
+            for (int i = 0; i < 22; i++)
+            {
+                float sx = i % 2 == 0 ? -1f : 1f;
+                Place(w, J + "bamboo.prefab", new Vector3(sx * (10.2f + (float)rng.NextDouble() * 2.5f), 0f, -4.5f + (float)rng.NextDouble() * 11f),
+                      (float)rng.NextDouble() * 360f, 4.5f + (float)rng.NextDouble() * 2f);
+            }
+
+            if (theme == null) return;
+            // 카메라 쪽 낮은 덤불 + 단풍 관목 몇 그루
+            if (theme.lowBorder != null && theme.lowBorder.Length > 0)
+                for (int i = 0; i < 20; i++)
+                {
+                    var pos = new Vector3(-12f + (float)rng.NextDouble() * 24f, 0f, Front - 0.9f - (float)rng.NextDouble() * 2.2f);
+                    if (Mathf.Abs(pos.x) < 1.8f) continue;   // 돌길 앞은 비운다
+                    PlaceFrom(w, theme.lowBorder, rng, pos, theme.lowBorderScale);
+                }
+            for (int i = 0; i < 4; i++)
+            {
+                float x = (i < 2 ? -1f : 1f) * (4f + (float)rng.NextDouble() * 5f);
+                Place(w, J + (i % 2 == 0 ? "shrub-round_red.prefab" : "shrub-round-leaves_red.prefab"),
+                      new Vector3(x, 0f, Front - 0.8f - (float)rng.NextDouble()), (float)rng.NextDouble() * 360f, 0.55f, false, 0.9f);
+            }
+            // 풀 무더기 — 마당과 돌길은 비운다
+            if (theme.clutter != null && theme.clutter.Length > 0)
+                for (int i = 0; i < 26; i++)
+                {
+                    float x = (float)(rng.NextDouble() * 2 - 1) * 10f;
+                    float zz = -5f + (float)rng.NextDouble() * 9.5f;
+                    if (Mathf.Abs(x) < 2f || (zz > -2.8f && Mathf.Abs(x) < 10f)) continue;
+                    PlaceFrom(w, theme.clutter, rng, new Vector3(x, 0f, zz), theme.clutterScale);
+                }
+        }
+
+        static void PlaceFrom(Transform w, GameObject[] pool, System.Random rng, Vector3 pos, Vector2 scale)
+        {
+            var prefab = pool[rng.Next(pool.Length)];
+            if (prefab == null) return;
+            var go = (GameObject)PrefabUtility.InstantiatePrefab(prefab, w);
+            go.transform.localPosition = pos;
+            go.transform.localRotation = Quaternion.Euler(0f, (float)rng.NextDouble() * 360f, 0f);
+            go.transform.localScale = prefab.transform.localScale * Mathf.Lerp(scale.x, scale.y, (float)rng.NextDouble());
+            foreach (var c in go.GetComponentsInChildren<Collider>()) Object.DestroyImmediate(c);
+        }
+
+        // ───────────────────────────── NPC ─────────────────────────────
+
+        static VillageNpc Npc(Transform w, string model, Vector3 pos, float yaw, NpcRole role,
+                              string title, string name, Color titleColor, RuntimeAnimatorController ctrl)
+        {
+            var root = new GameObject("Npc_" + role);
+            root.transform.SetParent(w, false);
+            root.transform.localPosition = pos;
+
+            var col = root.AddComponent<CapsuleCollider>();   // 몸으로 막는다 — 뚫고 지나가면 사람이 아니라 그림이다
+            col.radius = 0.45f; col.height = 1.8f; col.center = new Vector3(0f, 0.9f, 0f);
+
+            Transform modelT = null;
+            var prefab = AssetDatabase.LoadAssetAtPath<GameObject>(People + model + ".prefab");
+            if (prefab != null)
+            {
+                var m = (GameObject)PrefabUtility.InstantiatePrefab(prefab, root.transform);
+                PrefabUtility.UnpackPrefabInstance(m, PrefabUnpackMode.Completely, InteractionMode.AutomatedAction);
+                m.name = "Model";
+                m.transform.localPosition = Vector3.zero;
+                m.transform.localRotation = Quaternion.Euler(0f, yaw, 0f);
+                Strip(m);
+                var anim = m.GetComponent<Animator>();
+                if (anim == null) anim = m.AddComponent<Animator>();
+                anim.runtimeAnimatorController = ctrl;
+                anim.applyRootMotion = false;
+                modelT = m.transform;
+            }
+
+            string hex = ColorUtility.ToHtmlStringRGB(titleColor);
+            Label(root.transform, "Nameplate", $"<size=70%><color=#{hex}>{title}</color></size>\n{name}",
+                  new Vector3(0f, 2.55f, 0f), 2.6f, Color.white);
+            var prompt = Label(root.transform, "Prompt", "<color=#ffd45a>Space</color>  대화",
+                  new Vector3(0f, 3.35f, 0f), 3.0f, Color.white);
+            var badge = Label(root.transform, "Badge", "<color=#ffcc33>!</color>",
+                  new Vector3(0f, 3.95f, 0f), 6f, Color.white);
+            badge.fontStyle = FontStyles.Bold;
+
+            var npc = root.AddComponent<VillageNpc>();
+            Set(npc, "role", (int)role);
+            Set(npc, "model", modelT);
+            Set(npc, "prompt", prompt.gameObject);
+            Set(npc, "badge", badge.gameObject);
+            Set(npc, "restYaw", yaw);
+            return npc;
+        }
+
+        /// <summary>
+        /// 팩이 붙여 둔 스크립트·콜라이더를 뗀다. 스크립트를 먼저 지워야
+        /// [RequireComponent]로 묶인 CharacterController 같은 것도 지워진다.
+        /// </summary>
+        static void Strip(GameObject m)
+        {
+            foreach (var c in m.GetComponentsInChildren<MonoBehaviour>(true)) if (c != null) Object.DestroyImmediate(c);
+            for (int pass = 0; pass < 3; pass++)
+                foreach (var c in m.GetComponentsInChildren<Component>(true))
+                {
+                    if (c == null || c is Transform || c is Animator || c is Renderer || c is MeshFilter) continue;
+                    Object.DestroyImmediate(c);
+                }
+        }
+
+        /// <summary>카메라를 마주 보는 월드 글씨. 카메라가 20° 내려다보므로 같은 각도로 눕힌다.</summary>
+        static TextMeshPro Label(Transform parent, string name, string text, Vector3 localPos, float size, Color c)
+        {
+            var go = new GameObject(name);
+            go.transform.SetParent(parent, false);
+            go.transform.localPosition = localPos;
+            go.transform.rotation = Quaternion.Euler(20f, 0f, 0f);
+            var t = go.AddComponent<TextMeshPro>();
+            t.text = text;
+            t.fontSize = size;
+            t.alignment = TextAlignmentOptions.Center;
+            t.color = c;
+            t.textWrappingMode = TextWrappingModes.NoWrap;
+            t.rectTransform.sizeDelta = new Vector2(8f, 2f);
+            t.sortingOrder = 10;
+            return t;
+        }
+
+        // ───────────────────────────── 도구 ─────────────────────────────
+
+        /// <summary>프리팹을 놓고 높이를 맞춘다. solid면 발밑에 막는 상자를 깐다.</summary>
+        static GameObject Place(Transform parent, string path, Vector3 pos, float yaw, float height, bool solid = false, float maxWidth = 0f)
+        {
+            var prefab = AssetDatabase.LoadAssetAtPath<GameObject>(path);
+            if (prefab == null) { Debug.LogWarning("[Village] 프리팹 없음: " + path); return null; }
+            var go = (GameObject)PrefabUtility.InstantiatePrefab(prefab, parent);
+            go.transform.position = pos;
+            go.transform.rotation = Quaternion.Euler(0f, yaw, 0f);
+            foreach (var c in go.GetComponentsInChildren<Collider>(true)) Object.DestroyImmediate(c);
+
+            var b = WorldBounds(go);
+            if (b.size.y > 0.001f)
+            {
+                float k = height / b.size.y;
+                float wide = Mathf.Max(b.size.x, b.size.z);
+                if (maxWidth > 0f && wide * k > maxWidth) k = maxWidth / wide;   // 납작하고 넓은 것이 너무 커지지 않게
+                go.transform.localScale *= k;
+                b = WorldBounds(go);
+                go.transform.position += new Vector3(0f, pos.y - b.min.y, 0f);   // 바닥에 붙인다
+            }
+
+            if (solid)
+            {
+                b = WorldBounds(go);
+                var block = new GameObject("Block");
+                block.transform.SetParent(go.transform, true);
+                block.transform.position = new Vector3(b.center.x, 1f, b.center.z);
+                block.transform.rotation = Quaternion.identity;
+                var bc = block.AddComponent<BoxCollider>();
+                var ls = block.transform.lossyScale;
+                bc.size = new Vector3(b.size.x * 0.8f / ls.x, 2f / ls.y, b.size.z * 0.8f / ls.z);
+            }
+            return go;
+        }
+
+        static Bounds WorldBounds(GameObject go)
+        {
+            var rs = go.GetComponentsInChildren<Renderer>();
+            if (rs.Length == 0) return new Bounds(go.transform.position, Vector3.zero);
+            var b = rs[0].bounds;
+            for (int i = 1; i < rs.Length; i++) b.Encapsulate(rs[i].bounds);
+            return b;
+        }
+
+        static Material PortalBackMaterial()
+        {
+            const string path = "Assets/_Project/Materials/PortalBack.mat";
+            var m = AssetDatabase.LoadAssetAtPath<Material>(path);
+            if (m == null)
+            {
+                m = new Material(Shader.Find("Universal Render Pipeline/Unlit"));
+                AssetDatabase.CreateAsset(m, path);
+            }
+            m.SetColor("_BaseColor", new Color(0.16f, 0.06f, 0.28f));
+            EditorUtility.SetDirty(m);
+            return m;
+        }
+
+        /// <summary>소용돌이 — 나선 팔이 있는 원형 텍스처를 그려서 반투명으로 얹는다.</summary>
+        static Material PortalSwirlMaterial()
+        {
+            const string png = "Assets/_Project/Sprites/PortalSwirl.png";
+            if (!System.IO.File.Exists(png))
+            {
+                const int N = 256;
+                var tex = new Texture2D(N, N, TextureFormat.RGBA32, false);
+                var px = new Color32[N * N];
+                for (int y = 0; y < N; y++)
+                for (int x = 0; x < N; x++)
+                {
+                    float u = (x + 0.5f) / N * 2f - 1f, v = (y + 0.5f) / N * 2f - 1f;
+                    float r = Mathf.Sqrt(u * u + v * v);
+                    float a = Mathf.Atan2(v, u);
+                    float arms = 0.5f + 0.5f * Mathf.Cos(a * 3f + r * 9f);
+                    float fall = Mathf.Clamp01(1f - r);
+                    float core = Mathf.Clamp01(1f - r * 2.2f);
+                    float alpha = Mathf.Clamp01(Mathf.Pow(arms, 2.2f) * fall * 1.3f + core * 0.9f) * Mathf.Clamp01((1f - r) * 6f);
+                    var col = Color.Lerp(new Color(0.55f, 0.30f, 1f), new Color(0.95f, 0.85f, 1f), core);
+                    px[y * N + x] = new Color(col.r, col.g, col.b, alpha);
+                }
+                tex.SetPixels32(px); tex.Apply();
+                System.IO.Directory.CreateDirectory("Assets/_Project/Sprites");
+                System.IO.File.WriteAllBytes(png, tex.EncodeToPNG());
+                Object.DestroyImmediate(tex);
+                AssetDatabase.ImportAsset(png, ImportAssetOptions.ForceUpdate);
+                var imp = (TextureImporter)AssetImporter.GetAtPath(png);
+                imp.alphaIsTransparency = true;
+                imp.wrapMode = TextureWrapMode.Clamp;
+                imp.SaveAndReimport();
+            }
+
+            const string path = "Assets/_Project/Materials/PortalSwirl.mat";
+            var m = AssetDatabase.LoadAssetAtPath<Material>(path);
+            if (m == null)
+            {
+                m = new Material(Shader.Find("Universal Render Pipeline/Unlit"));
+                AssetDatabase.CreateAsset(m, path);
+            }
+            m.SetTexture("_BaseMap", AssetDatabase.LoadAssetAtPath<Texture2D>(png));
+            m.SetColor("_BaseColor", Color.white);
+            m.SetFloat("_Surface", 1f);
+            m.SetFloat("_Blend", 2f);   // Additive
+            m.SetFloat("_SrcBlend", (float)UnityEngine.Rendering.BlendMode.SrcAlpha);
+            m.SetFloat("_DstBlend", (float)UnityEngine.Rendering.BlendMode.One);
+            m.SetFloat("_ZWrite", 0f);
+            m.EnableKeyword("_SURFACE_TYPE_TRANSPARENT");
+            m.renderQueue = (int)UnityEngine.Rendering.RenderQueue.Transparent;
+            m.SetOverrideTag("RenderType", "Transparent");
+            EditorUtility.SetDirty(m);
+            return m;
+        }
+
+        static void Tint(GameObject go, Color c)
+        {
+            var t = go.GetComponent<Proto.Feel.Tint>();
+            if (t == null) t = go.AddComponent<Proto.Feel.Tint>();
+            t.Set(c);
+        }
+
+        static void Set(Object target, string field, object value)
+        {
+            var so = new SerializedObject(target);
+            var prop = so.FindProperty(field);
+            if (prop == null) { Debug.LogWarning("[Village] 필드 없음: " + target.GetType().Name + "." + field); return; }
+            if (value is Object o) prop.objectReferenceValue = o;
+            else if (value is int i) { if (prop.propertyType == SerializedPropertyType.Enum) prop.enumValueIndex = i; else prop.intValue = i; }
+            else if (value is float f) prop.floatValue = f;
+            else if (value == null) prop.objectReferenceValue = null;
+            so.ApplyModifiedPropertiesWithoutUndo();
+        }
+    }
+}
+#endif

@@ -1,0 +1,332 @@
+using System.Collections.Generic;
+using UnityEngine;
+using Proto.Data;
+
+namespace Proto.Dungeon
+{
+    /// <summary>
+    /// 방 하나를 스테이지 테마대로 꾸민다.
+    ///
+    /// 같은 방에 다시 들어오면 같은 모습이어야 한다. 돌아왔는데 숲이 바뀌어 있으면
+    /// 플레이어가 길을 기억할 수 없고, 격자 맵을 쓰는 의미가 사라진다.
+    /// 그래서 (런 시드 + 방 좌표)로 난수를 고정한다.
+    /// </summary>
+    public class RoomDecorator : MonoBehaviour
+    {
+        [SerializeField] StageTheme theme;
+        [SerializeField] Transform decorRoot;
+        [SerializeField] Vector2 arenaSize = new Vector2(18f, 10f);
+
+        [Tooltip("바닥 렌더러. 테마 색으로 칠한다.")]
+        [SerializeField] Renderer ground;
+
+        [Tooltip("아레나 벽. 나무가 벽 역할을 하므로 렌더러는 끄고 콜라이더만 남긴다.")]
+        [SerializeField] Renderer[] walls;
+
+        readonly List<GameObject> _spawned = new();
+        bool _envApplied;
+
+        public StageTheme Theme => theme;
+        public void SetTheme(StageTheme t) { theme = t; _envApplied = false; }
+
+        /// <summary>
+        /// 방을 꾸민다. 방 내용물(적·광맥·출구)을 놓기 전에 부르든 뒤에 부르든
+        /// 상관없도록 장식에는 콜라이더를 남기지 않는다.
+        /// </summary>
+        public void Decorate(Vector2Int cell, Dir exits, Vector3 entry, int runSeed)
+        {
+            Clear();
+            if (theme == null) return;
+
+            ApplyEnvironment();
+
+            // 같은 방 = 같은 숲
+            var rng = new System.Random(runSeed * 73856093 ^ cell.x * 19349663 ^ cell.y * 83492791);
+
+            BuildBorder(rng, exits);
+            BuildLowBorder(rng, exits);
+            BuildObstacles(rng, entry);
+            BuildClutter(rng);
+
+            if (theme.staticBatch && _spawned.Count > 0)
+                StaticBatchingUtility.Combine(_spawned.ToArray(), decorRoot.gameObject);
+        }
+
+        public void Clear()
+        {
+            foreach (var go in _spawned) if (go != null) Destroy(go);
+            _spawned.Clear();
+        }
+
+        // ──────────────────────────────────────────────────────────
+
+        /// <summary>마을이 같은 하늘·안개를 쓰도록 공개한다. 이미 적용했으면 아무것도 안 한다.</summary>
+        public void EnsureEnvironment() { if (theme != null) ApplyEnvironment(); }
+
+        /// <summary>마을이 하늘·안개를 바꿔 놓았으면 던전에 들어갈 때 다시 칠한다.</summary>
+        public void ReapplyEnvironment() { _envApplied = false; EnsureEnvironment(); }
+
+        void ApplyEnvironment()
+        {
+            if (_envApplied) return;
+            _envApplied = true;
+
+            if (theme.groundMaterial != null && ground != null)
+            {
+                // 빌더가 붙인 임시 색(Tint)이 남아 있으면 아레나를 다시 켤 때 바닥을 덮어 칠한다
+                var tint = ground.GetComponent<Proto.Feel.Tint>();
+                if (tint != null) Destroy(tint);
+                ground.sharedMaterial = theme.groundMaterial;
+                // 바닥 큐브는 20x12m인데 텍스처는 1타일이므로 늘어난다. 타일 수를 맞춘다.
+                // 기존 블록을 이어받지 않는다 — 빌더의 임시 색(_BaseColor)이 남아 바닥이 어둡게 칠해진다
+                var block = new MaterialPropertyBlock();
+                block.SetVector("_BaseMap_ST", new Vector4(
+                    20f / theme.groundTileSize, 12f / theme.groundTileSize, 0f, 0f));
+                ground.SetPropertyBlock(block);
+            }
+            else Tint(ground, theme.groundColor);
+            foreach (var w in walls) if (w != null) w.enabled = false;
+
+            // 배경을 안개색과 맞춘다. 안 맞추면 뒷벽 위쪽이 검은 허공으로 잘려 보인다.
+            var mainCam = Camera.main;
+            if (mainCam != null)
+            {
+                mainCam.clearFlags = CameraClearFlags.SolidColor;
+                mainCam.backgroundColor = theme.skyColor;
+            }
+
+            RenderSettings.fog = theme.useFog;
+            if (theme.useFog)
+            {
+                RenderSettings.fogMode = FogMode.Linear;
+                RenderSettings.fogColor = theme.fogColor;
+                RenderSettings.fogStartDistance = theme.fogStart;
+                RenderSettings.fogEndDistance = theme.fogEnd;
+            }
+
+            RenderSettings.ambientMode = UnityEngine.Rendering.AmbientMode.Flat;
+            RenderSettings.ambientLight = theme.ambientColor;
+
+            var sun = FindSun();
+            if (sun != null) sun.color = theme.sunColor;
+        }
+
+        /// <summary>
+        /// 방 밖을 나무로 둘러싼다. 출구 앞만 비워서 "저기로 나갈 수 있다"가
+        /// 지형만 보고도 읽히게 한다.
+        /// </summary>
+        void BuildBorder(System.Random rng, Dir exits)
+        {
+            if (theme.borderTrees == null || theme.borderTrees.Length == 0) return;
+
+            float hx = arenaSize.x * 0.5f;
+            float hz = arenaSize.y * 0.5f;
+
+            for (int row = 0; row < theme.borderRows; row++)
+            {
+                float out_ = 1.2f + row * theme.borderRowGap;
+                // 겹마다 반 칸씩 어긋나게 심어야 사이로 뒤가 안 보인다
+                float jitterPhase = row * theme.borderSpacing * 0.5f;
+
+                // 남·북 변 (X를 따라)
+                // 남쪽은 카메라와 플레이어 사이라 큰 나무를 심지 않는다
+                for (float x = -hx - out_; x <= hx + out_; x += theme.borderSpacing)
+                {
+                    float px = x + jitterPhase;
+                    if (!theme.openCameraSide && !IsBlockedByExit(exits, Dir.S, px))
+                        Place(theme.borderTrees, rng, new Vector3(px, 0f, -hz - out_), theme.borderScale);
+                    if (!IsBlockedByExit(exits, Dir.N, px))
+                        Place(theme.borderTrees, rng, new Vector3(px, 0f,  hz + out_), theme.borderScale);
+                }
+                // 서·동 변 (Z를 따라)
+                // 카메라가 내려다보는 각도 때문에, 플레이어보다 앞(남쪽)에 있는 큰 나무는
+                // 아무리 옆으로 비켜 있어도 캐릭터를 덮는다. 남쪽 절반은 아예 비운다.
+                // 동·서 변은 거대 나무 대신 한 단계 작은 나무로
+                var sidePool = (theme.sideTrees != null && theme.sideTrees.Length > 0) ? theme.sideTrees : theme.borderTrees;
+                float zMin = theme.openCameraSide ? hz * 0.4f : -hz - out_;
+                float outSide = theme.openCameraSide ? out_ + theme.sideBorderOutset : out_;
+                for (float z = zMin; z <= hz + out_; z += theme.sideSpacing)
+                {
+                    float pz = z + jitterPhase;
+                    if (!IsBlockedByExit(exits, Dir.W, pz)) Place(sidePool, rng, new Vector3(-hx - outSide, 0f, pz), theme.sideTreeScale);
+                    if (!IsBlockedByExit(exits, Dir.E, pz)) Place(sidePool, rng, new Vector3( hx + outSide, 0f, pz), theme.sideTreeScale);
+                }
+            }
+
+            // 나무 밑동 사이 메우기
+            if (theme.borderFill == null || theme.borderFill.Length == 0) return;
+            for (int i = 0; i < theme.borderFillCount; i++)
+            {
+                bool alongX = rng.NextDouble() < 0.5;
+                float along = (float)(rng.NextDouble() * 2 - 1) * (alongX ? hx + 2f : hz + 2f);
+                float sign = rng.NextDouble() < 0.5 ? -1f : 1f;
+                float side = sign * ((alongX ? hz : hx) + 1f + (float)rng.NextDouble() * 2f);
+
+                // 덤불도 출구 통로는 비워야 한다. 안 그러면 나무만 치우고 발치가 막힌다.
+                Dir onSide = alongX ? (sign > 0 ? Dir.N : Dir.S) : (sign > 0 ? Dir.E : Dir.W);
+                if (IsBlockedByExit(exits, onSide, along)) continue;
+                if (theme.openCameraSide && onSide == Dir.S) continue;   // 남쪽은 따로 처리한다
+
+                var pos = alongX ? new Vector3(along, 0f, side) : new Vector3(side, 0f, along);
+                // 남쪽 절반은 낮은 것(BuildLowBorder)이 담당한다
+                if (theme.openCameraSide && pos.z < hz * 0.4f) continue;
+                Place(theme.borderFill, rng, pos, theme.borderFillScale);
+            }
+        }
+
+        /// <summary>
+        /// 카메라 쪽(남쪽) 변. 큰 나무 대신 낮은 것만 깐다.
+        /// 아무것도 없으면 바닥이 허공에서 끊겨 보이고, 크면 캐릭터를 가린다.
+        /// </summary>
+        void BuildLowBorder(System.Random rng, Dir exits)
+        {
+            if (!theme.openCameraSide) return;
+            if (theme.lowBorder == null || theme.lowBorder.Length == 0) return;
+
+            float hx = arenaSize.x * 0.5f;
+            float hz = arenaSize.y * 0.5f;
+
+            // 남쪽 변
+            for (int i = 0; i < theme.lowBorderCount; i++)
+            {
+                float x = (float)(rng.NextDouble() * 2 - 1) * (hx + 2.5f);
+                if (IsBlockedByExit(exits, Dir.S, x)) continue;
+
+                float z = -hz - 0.6f - (float)rng.NextDouble() * 3.0f;
+                Place(theme.lowBorder, rng, new Vector3(x, 0f, z), theme.lowBorderScale);
+            }
+
+            // 동·서 변의 남쪽 절반 — 나무를 걷어낸 자리를 낮은 것으로 메운다
+            for (int i = 0; i < theme.lowBorderCount; i++)
+            {
+                float z = -hz - 1f + (float)rng.NextDouble() * (hz + 1f);   // -hz-1 ~ 0
+                float sign = rng.NextDouble() < 0.5 ? -1f : 1f;
+                Dir side = sign > 0 ? Dir.E : Dir.W;
+                if (IsBlockedByExit(exits, side, z)) continue;
+
+                float x = sign * (hx + 0.6f + (float)rng.NextDouble() * 3.0f);
+                Place(theme.lowBorder, rng, new Vector3(x, 0f, z), theme.lowBorderScale);
+            }
+        }
+
+        /// <summary>출구가 뚫려 있는 변에서, 출구 폭 안쪽이면 나무를 심지 않는다.</summary>
+        bool IsBlockedByExit(Dir exits, Dir side, float coordAlongSide)
+        {
+            if ((exits & side) == 0) return false;          // 막힌 변이면 다 심는다
+            return Mathf.Abs(coordAlongSide) < theme.exitGapHalfWidth;
+        }
+
+        void BuildObstacles(System.Random rng, Vector3 entry)
+        {
+            if (theme.obstacles == null || theme.obstacles.Length == 0) return;
+
+            int n = rng.Next(theme.obstacleCount.x, theme.obstacleCount.y + 1);
+            var placed = new List<Vector3>();
+
+            for (int i = 0; i < n; i++)
+            {
+                for (int attempt = 0; attempt < 20; attempt++)
+                {
+                    var p = RandomInside(rng, 0.72f);
+                    if (Vector3.Distance(p, entry) < theme.obstacleClearFromEntry) continue;
+
+                    bool tooClose = false;
+                    foreach (var q in placed) if (Vector3.Distance(p, q) < 3.5f) { tooClose = true; break; }
+                    if (tooClose) continue;
+
+                    placed.Add(p);
+                    Place(theme.obstacles, rng, p, theme.obstacleScale);
+                    break;
+                }
+            }
+        }
+
+        /// <summary>
+        /// 잡초를 뭉쳐서 심는다.
+        /// 풀은 고르게 나지 않는다. 균일하게 흩뿌리면 개수를 아무리 조절해도
+        /// 노이즈로 보이고, 바닥이 지저분하다는 인상만 준다.
+        /// 무리를 몇 개 잡고 그 주변에 몰아 심으면 같은 개수로도 훨씬 정돈돼 보인다.
+        /// </summary>
+        void BuildClutter(System.Random rng)
+        {
+            if (theme.clutter == null || theme.clutter.Length == 0) return;
+
+            int n = rng.Next(theme.clutterCount.x, theme.clutterCount.y + 1);
+            int clumpCount = Mathf.Max(1, theme.clutterClumps);
+
+            // 무리 중심부터 잡는다
+            var centers = new List<Vector3>(clumpCount);
+            for (int i = 0; i < clumpCount; i++) centers.Add(RandomInside(rng, 0.85f));
+
+            for (int i = 0; i < n; i++)
+            {
+                Vector3 pos;
+                if (rng.NextDouble() < theme.clutterStrayRatio)
+                {
+                    pos = RandomInside(rng, 0.95f);          // 홀로 난 것
+                }
+                else
+                {
+                    var c = centers[rng.Next(centers.Count)];
+                    // 중심에 몰리도록 반경을 제곱근 분포가 아니라 그대로 쓴다
+                    float ang = (float)(rng.NextDouble() * Mathf.PI * 2.0);
+                    float rad = (float)rng.NextDouble() * theme.clutterClumpRadius;
+                    pos = c + new Vector3(Mathf.Cos(ang) * rad, 0f, Mathf.Sin(ang) * rad);
+                    pos.x = Mathf.Clamp(pos.x, -arenaSize.x * 0.5f, arenaSize.x * 0.5f);
+                    pos.z = Mathf.Clamp(pos.z, -arenaSize.y * 0.5f, arenaSize.y * 0.5f);
+                }
+                Place(theme.clutter, rng, pos, theme.clutterScale);
+            }
+        }
+
+        // ──────────────────────────────────────────────────────────
+
+        Vector3 RandomInside(System.Random rng, float spread)
+        {
+            return new Vector3(
+                (float)(rng.NextDouble() * 2 - 1) * arenaSize.x * 0.5f * spread,
+                0f,
+                (float)(rng.NextDouble() * 2 - 1) * arenaSize.y * 0.5f * spread);
+        }
+
+        void Place(GameObject[] pool, System.Random rng, Vector3 localPos, Vector2 scaleRange)
+        {
+            var prefab = pool[rng.Next(pool.Length)];
+            if (prefab == null) return;
+
+            var go = Instantiate(prefab, decorRoot);
+            go.transform.localPosition = localPos;
+            go.transform.localRotation = Quaternion.Euler(0f, (float)rng.NextDouble() * 360f, 0f);
+
+            float s = Mathf.Lerp(scaleRange.x, scaleRange.y, (float)rng.NextDouble());
+            go.transform.localScale = prefab.transform.localScale * s;
+
+            if (theme.stripColliders)
+                foreach (var c in go.GetComponentsInChildren<Collider>()) Destroy(c);
+
+            go.SetActive(true);
+            _spawned.Add(go);
+        }
+
+        /// <summary>해(방향광). 포털·횃불 같은 점광이 먼저 잡히지 않게 종류로 고른다.</summary>
+        public static Light FindSun()
+        {
+            if (RenderSettings.sun != null) return RenderSettings.sun;
+            foreach (var l in FindObjectsByType<Light>(FindObjectsSortMode.None))
+                if (l.type == LightType.Directional) return l;
+            return null;
+        }
+
+        static void Tint(Renderer r, Color c)
+        {
+            if (r == null) return;
+            var t = r.GetComponent<Proto.Feel.Tint>();
+            if (t != null) { t.Set(c); return; }
+            var block = new MaterialPropertyBlock();
+            r.GetPropertyBlock(block);
+            block.SetColor("_BaseColor", c);
+            block.SetColor("_Color", c);
+            r.SetPropertyBlock(block);
+        }
+    }
+}

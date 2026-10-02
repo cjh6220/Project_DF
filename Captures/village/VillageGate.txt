@@ -1,0 +1,31 @@
+using UnityEngine;
+
+namespace Proto.Town
+{
+    /// <summary>
+    /// 마을 가운데 문. 플레이어가 걸어 들어가면 던전으로 간다.
+    /// 문 안쪽 소용돌이와 불빛이 천천히 숨 쉰다 — 멀리서도 "저기가 입구"로 읽히게.
+    /// </summary>
+    [RequireComponent(typeof(Collider))]
+    public class VillageGate : MonoBehaviour
+    {
+        [SerializeField] VillageController village;
+        [SerializeField] Transform swirl;
+        [SerializeField] Light glow;
+        [SerializeField] float glowBase = 2.2f;
+
+        void OnTriggerEnter(Collider other) => Try(other);
+        void OnTriggerStay(Collider other) => Try(other);
+
+        void Try(Collider other)
+        {
+            if (village != null && other.CompareTag("Player")) village.OnGateEntered();
+        }
+
+        void Update()
+        {
+            if (swirl != null) swirl.Rotate(0f, 0f, -40f * Time.deltaTime, Space.Self);
+            if (glow != null) glow.intensity = glowBase * (0.85f + 0.15f * Mathf.Sin(Time.time * 2.4f));
+        }
+    }
+}

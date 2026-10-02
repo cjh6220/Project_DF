@@ -1,0 +1,242 @@
+using System.Collections;
+using System.Collections.Generic;
+using UnityEngine;
+using UnityEngine.UI;
+using TMPro;
+using Proto.Core;
+
+namespace Proto.UI
+{
+    /// <summary>
+    /// 입력 장치가 바뀌는 순간의 연출.
+    ///
+    ///   1) 버튼 표기 글자가 카드 뒤집히듯 한 번 접혔다 펴지며 새 표기로 바뀐다 (왼쪽부터 물결처럼)
+    ///   2) 오른쪽 아래에 "듀얼센스" 알림이 미끄러져 들어오고, 빛줄기가 한 번 훑고 지나간다
+    ///
+    /// 씬에 따로 놓지 않는다. 게임이 시작되면 스스로 생긴다.
+    /// 버튼 표기를 바꾸는 쪽은 text = ... 대신 InputFx.Set(text, ...)을 부르면 된다.
+    /// </summary>
+    public class InputFx : MonoBehaviour
+    {
+        static InputFx _i;
+
+        RectTransform _toast, _shine;
+        CanvasGroup _toastCg;
+        TextMeshProUGUI _toastGlyph, _toastName, _toastSub;
+        Coroutine _toastCo;
+
+        readonly Dictionary<TMP_Text, Coroutine> _running = new Dictionary<TMP_Text, Coroutine>();
+        readonly Dictionary<TMP_Text, Color> _baseColor = new Dictionary<TMP_Text, Color>();
+
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
+        static void Boot()
+        {
+            if (_i != null) return;
+            var go = new GameObject("[InputFx]");
+            DontDestroyOnLoad(go);
+            _i = go.AddComponent<InputFx>();
+        }
+
+        void Awake()
+        {
+            GameInput.Ensure();
+            BuildToast();
+            GameInput.SchemeChanged += OnSchemeChanged;
+        }
+
+        void OnDestroy() => GameInput.SchemeChanged -= OnSchemeChanged;
+
+        // ───────────────────────────── 글자 뒤집기 ─────────────────────────────
+
+        /// <summary>
+        /// 버튼 표기를 바꾼다. 글자가 달라졌고 화면에 보이는 중이면 뒤집기 연출을 한다.
+        /// delay로 여러 글자를 차례로 뒤집으면 물결처럼 훑고 지나간다.
+        /// </summary>
+        public static void Set(TMP_Text t, string text, float delay = 0f)
+        {
+            if (t == null || t.text == text) return;
+            if (_i == null || !t.isActiveAndEnabled) { t.text = text; return; }
+            _i.Begin(t, text, delay);
+        }
+
+        void Begin(TMP_Text t, string text, float delay)
+        {
+            if (_running.TryGetValue(t, out var co) && co != null) StopCoroutine(co);
+            if (!_baseColor.ContainsKey(t)) _baseColor[t] = t.color;
+            _running[t] = StartCoroutine(Flip(t, text, delay));
+        }
+
+        IEnumerator Flip(TMP_Text t, string text, float delay)
+        {
+            var tr = t.transform;
+            var baseColor = _baseColor[t];
+            var flash = new Color(1f, 0.93f, 0.62f, baseColor.a);
+
+            float w = 0f;
+            while (w < delay) { w += Time.unscaledDeltaTime; yield return null; }
+
+            // 접기 — 가로로 납작해진다
+            const float fold = 0.07f, open = 0.2f;
+            float e = 0f;
+            while (e < fold && t != null)
+            {
+                e += Time.unscaledDeltaTime;
+                float k = Mathf.Clamp01(e / fold);
+                tr.localScale = new Vector3(1f - k * k, 1f + 0.1f * k, 1f);
+                yield return null;
+            }
+            if (t == null) yield break;
+
+            t.text = text;
+
+            // 펴기 — 살짝 넘치게 펴지며 금빛이 번졌다 빠진다
+            e = 0f;
+            while (e < open && t != null)
+            {
+                e += Time.unscaledDeltaTime;
+                float k = Mathf.Clamp01(e / open);
+                float sx = BackOut(k);
+                tr.localScale = new Vector3(sx, 1f + 0.1f * (1f - k), 1f);
+                t.color = Color.Lerp(flash, baseColor, k * k);
+                yield return null;
+            }
+            if (t == null) yield break;
+            tr.localScale = Vector3.one;
+            t.color = baseColor;
+            _running.Remove(t);
+        }
+
+        static float BackOut(float k)
+        {
+            const float c = 2.2f;
+            float x = k - 1f;
+            return 1f + (c + 1f) * x * x * x + c * x * x;
+        }
+
+        // ───────────────────────────── 장치 알림 ─────────────────────────────
+
+        void BuildToast()
+        {
+            var canvasGo = new GameObject("InputFxCanvas", typeof(Canvas), typeof(CanvasScaler));
+            canvasGo.transform.SetParent(transform, false);
+            var canvas = canvasGo.GetComponent<Canvas>();
+            canvas.renderMode = RenderMode.ScreenSpaceOverlay;
+            canvas.sortingOrder = 500;   // 전환막보다도 위
+            var scaler = canvasGo.GetComponent<CanvasScaler>();
+            scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
+            scaler.referenceResolution = new Vector2(1920f, 1080f);
+
+            var border = UiKit.Image(canvasGo.transform, "Toast", new Color(0.86f, 0.64f, 0.30f, 1f), UiArt.RoundRectFill);
+            border.type = Image.Type.Sliced;
+            _toast = border.rectTransform;
+            _toast.anchorMin = _toast.anchorMax = new Vector2(1f, 0f);
+            _toast.pivot = new Vector2(1f, 0f);
+            _toast.sizeDelta = new Vector2(360f, 84f);
+            _toastCg = border.gameObject.AddComponent<CanvasGroup>();
+            _toastCg.blocksRaycasts = false;
+
+            var panel = UiKit.Image(_toast, "Panel", new Color(0.09f, 0.075f, 0.12f, 0.97f), UiArt.RoundRectFill);
+            panel.type = Image.Type.Sliced;
+            UiKit.Stretch(panel.rectTransform);
+            panel.rectTransform.offsetMin = new Vector2(2f, 2f);
+            panel.rectTransform.offsetMax = new Vector2(-2f, -2f);
+            panel.gameObject.AddComponent<RectMask2D>();
+
+            // 훑고 지나가는 빛줄기
+            var shine = UiKit.Image(panel.transform, "Shine", new Color(1f, 0.9f, 0.6f, 0.35f), UiKit.Soft);
+            _shine = shine.rectTransform;
+            _shine.anchorMin = _shine.anchorMax = new Vector2(0f, 0.5f);
+            _shine.sizeDelta = new Vector2(90f, 220f);
+            _shine.localRotation = Quaternion.Euler(0f, 0f, -20f);
+
+            _toastGlyph = UiKit.Text(panel.transform, "Glyph", "", 34);
+            var g = _toastGlyph.rectTransform;
+            g.anchorMin = g.anchorMax = new Vector2(0f, 0.5f);
+            g.pivot = new Vector2(0f, 0.5f);
+            g.anchoredPosition = new Vector2(22f, 0f);
+            g.sizeDelta = new Vector2(120f, 50f);
+
+            _toastName = UiKit.Text(panel.transform, "Name", "", 26, TextAlignmentOptions.Left);
+            var n = _toastName.rectTransform;
+            n.anchorMin = n.anchorMax = new Vector2(0f, 0.5f);
+            n.pivot = new Vector2(0f, 0.5f);
+            n.anchoredPosition = new Vector2(150f, 12f);
+            n.sizeDelta = new Vector2(200f, 34f);
+            _toastName.fontStyle = FontStyles.Bold;
+
+            _toastSub = UiKit.Text(panel.transform, "Sub", "", 17, TextAlignmentOptions.Left);
+            var s = _toastSub.rectTransform;
+            s.anchorMin = s.anchorMax = new Vector2(0f, 0.5f);
+            s.pivot = new Vector2(0f, 0.5f);
+            s.anchoredPosition = new Vector2(150f, -16f);
+            s.sizeDelta = new Vector2(200f, 24f);
+            _toastSub.color = new Color(0.66f, 0.63f, 0.74f, 1f);
+
+            border.gameObject.SetActive(false);
+        }
+
+        void OnSchemeChanged()
+        {
+            switch (GameInput.Scheme)
+            {
+                case InputScheme.PlayStation:
+                    _toastGlyph.text = "<color=#ff9ad5>□</color><color=#5fe3b0>△</color><color=#ff6b6b>○</color><color=#86b6ff>×</color>";
+                    break;
+                case InputScheme.Xbox:
+                    _toastGlyph.text = "<color=#6ad35a>A</color><color=#ff5a5a>B</color><color=#4aa3ff>X</color><color=#ffd23a>Y</color>";
+                    break;
+                default:
+                    _toastGlyph.text = "<color=#ffd45a>Z X C</color>";
+                    break;
+            }
+            _toastName.text = GameInput.DeviceName;
+            _toastSub.text = "버튼 표시를 바꿨습니다";
+            if (_toastCo != null) StopCoroutine(_toastCo);
+            _toastCo = StartCoroutine(ShowToast());
+        }
+
+        IEnumerator ShowToast()
+        {
+            _toast.gameObject.SetActive(true);
+            Vector2 shown = new Vector2(-36f, 36f), hidden = new Vector2(420f, 36f);
+
+            // 들어오기 — 빠르게 미끄러져 들어와 살짝 넘쳤다 선다
+            float e = 0f;
+            while (e < 0.28f)
+            {
+                e += Time.unscaledDeltaTime;
+                float k = Mathf.Clamp01(e / 0.28f);
+                _toast.anchoredPosition = Vector2.LerpUnclamped(hidden, shown, BackOut(k));
+                _toastCg.alpha = Mathf.Clamp01(k * 2f);
+                _shine.anchoredPosition = new Vector2(Mathf.Lerp(-80f, 440f, k), 0f);
+                yield return null;
+            }
+            _toast.anchoredPosition = shown;
+
+            // 빛줄기 한 번 더
+            e = 0f;
+            while (e < 0.35f)
+            {
+                e += Time.unscaledDeltaTime;
+                _shine.anchoredPosition = new Vector2(Mathf.Lerp(-80f, 440f, e / 0.35f), 0f);
+                yield return null;
+            }
+
+            float hold = 0f;
+            while (hold < 1.2f) { hold += Time.unscaledDeltaTime; yield return null; }
+
+            // 나가기
+            e = 0f;
+            while (e < 0.22f)
+            {
+                e += Time.unscaledDeltaTime;
+                float k = Mathf.Clamp01(e / 0.22f);
+                _toast.anchoredPosition = Vector2.Lerp(shown, hidden, k * k);
+                _toastCg.alpha = 1f - k;
+                yield return null;
+            }
+            _toast.gameObject.SetActive(false);
+            _toastCo = null;
+        }
+    }
+}

@@ -1,0 +1,111 @@
+using UnityEngine;
+using UnityEngine.UI;
+using UnityEngine.InputSystem;
+using TMPro;
+using Proto.Core;
+
+namespace Proto.UI
+{
+    /// <summary>
+    /// 던전 포기.
+    ///
+    ///   오른쪽 위 [포기] 버튼 또는 Esc → 확인 창 (게임 일시정지)
+    ///   [포기하고 마을로] → 지금까지 얻은 자원을 챙겨 귀환, 정산 없이 바로 마을
+    ///   [계속하기] / Esc → 다시 진행
+    ///
+    /// 페널티는 없다. 실패해도 잃는 게 없다는 기획 원칙 그대로, 포기도 자원을 유지한다.
+    /// 실수로 누르지 않게 한 번 더 묻는다.
+    /// </summary>
+    public class GiveUpMenu : MonoBehaviour
+    {
+        [SerializeField] RunManager run;
+
+        RectTransform _root, _button;
+        bool _open;
+
+        void Awake()
+        {
+            Build();
+            _root.gameObject.SetActive(false);
+        }
+
+        void Start()
+        {
+            run.RunStarted += () => { Close(); _button.gameObject.SetActive(true); };
+            run.RunEnded += _ => { Close(); _button.gameObject.SetActive(false); };
+            run.VillageEntered += () => { Close(); _button.gameObject.SetActive(false); };
+            _button.gameObject.SetActive(run.Phase == RunPhase.InDungeon);
+        }
+
+        void Build()
+        {
+            // 오른쪽 위, 미니맵 아래 작은 버튼
+            var btn = UiKit.Button(transform, "GiveUpButton", "포기 (Esc)", new Vector2(150f, 38f), 18);
+            _button = (RectTransform)btn.transform;
+            _button.anchorMin = _button.anchorMax = new Vector2(1f, 1f);
+            _button.pivot = new Vector2(1f, 1f);
+            _button.anchoredPosition = new Vector2(-40f, -252f);
+            btn.onClick.AddListener(Open);
+
+            // 확인 창
+            _root = UiKit.Stretch(UiKit.Rect(transform, "GiveUpConfirm"));
+            var dim = UiKit.Image(_root, "Dim", new Color(0f, 0f, 0f, 0.6f), null, true);
+            UiKit.Stretch(dim.rectTransform);
+
+            var panel = UiKit.Image(_root, "Panel", new Color(0.10f, 0.09f, 0.13f, 0.97f));
+            UiKit.Place(panel.rectTransform, new Vector2(0.5f, 0.5f), Vector2.zero, new Vector2(560f, 250f));
+
+            var title = UiKit.Text(panel.transform, "Title", "던전을 포기할까요?", 34);
+            UiKit.Place(title.rectTransform, new Vector2(0.5f, 1f), new Vector2(0f, -50f), new Vector2(520f, 44f));
+            title.fontStyle = FontStyles.Bold;
+
+            var body = UiKit.Text(panel.transform, "Body", "지금까지 얻은 자원은 그대로 가져갑니다.", 22);
+            UiKit.Place(body.rectTransform, new Vector2(0.5f, 1f), new Vector2(0f, -104f), new Vector2(520f, 30f));
+            body.color = new Color(1f, 1f, 1f, 0.75f);
+
+            var yes = UiKit.Button(panel.transform, "Yes", "포기하고 마을로", new Vector2(240f, 54f), 21);
+            ((RectTransform)yes.transform).anchorMin = ((RectTransform)yes.transform).anchorMax = new Vector2(0.5f, 0f);
+            ((RectTransform)yes.transform).anchoredPosition = new Vector2(-128f, 50f);
+            yes.image.color = new Color(0.85f, 0.35f, 0.28f, 1f);
+            yes.onClick.AddListener(GiveUp);
+
+            var no = UiKit.Button(panel.transform, "No", "계속하기", new Vector2(240f, 54f), 21);
+            ((RectTransform)no.transform).anchorMin = ((RectTransform)no.transform).anchorMax = new Vector2(0.5f, 0f);
+            ((RectTransform)no.transform).anchoredPosition = new Vector2(128f, 50f);
+            no.onClick.AddListener(Close);
+        }
+
+        void Update()
+        {
+            if (run == null || run.Phase != RunPhase.InDungeon) return;
+            var kb = Keyboard.current;
+            if (kb != null && kb.escapeKey.wasPressedThisFrame)
+            {
+                if (_open) Close(); else Open();
+            }
+        }
+
+        void Open()
+        {
+            if (run.Phase != RunPhase.InDungeon) return;
+            _open = true;
+            _root.gameObject.SetActive(true);
+            transform.SetAsLastSibling();
+            Time.timeScale = 0f;   // 확인 창이 떠 있는 동안 피로도·몬스터가 멈춘다
+        }
+
+        void Close()
+        {
+            if (!_open) return;
+            _open = false;
+            _root.gameObject.SetActive(false);
+            Time.timeScale = 1f;
+        }
+
+        void GiveUp()
+        {
+            Close();
+            run.GiveUp();
+        }
+    }
+}

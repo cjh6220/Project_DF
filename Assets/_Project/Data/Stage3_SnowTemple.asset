@@ -1,0 +1,112 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 922b641bc974752439f28276800e7303, type: 3}
+  m_Name: Stage3_SnowTemple
+  m_EditorClassIdentifier: Assembly-CSharp::Proto.Data.StageTheme
+  stageName: "\uC124\uC0B0 \uC0AC\uCC30"
+  groundMaterial: {fileID: 2100000, guid: 873c472f84689974cb2bc8761042ea86, type: 2}
+  groundTileSize: 6
+  groundColor: {r: 0.88, g: 0.92, b: 0.98, a: 1}
+  wallColor: {r: 0.08, g: 0.11, b: 0.08, a: 1}
+  skyColor: {r: 0.84, g: 0.89, b: 0.96, a: 1}
+  useFog: 1
+  fogColor: {r: 0.8, g: 0.86, b: 0.94, a: 1}
+  fogStart: 22
+  fogEnd: 46
+  ambientColor: {r: 0.62, g: 0.68, b: 0.78, a: 1}
+  backdrop: {fileID: 2800000, guid: 8381df648d1ce3547809eee93840c309, type: 3}
+  backdropShift: 0.15
+  backdropHaze: 0.25
+  sunColor: {r: 0.95, g: 0.97, b: 1, a: 1}
+  borderTrees:
+  - {fileID: 8521408192733139688, guid: 43360905efbff2b4bbb83aa0db269dfd, type: 3}
+  - {fileID: 4540809894737371721, guid: 496214a5473746b4ab69c9355e0f409a, type: 3}
+  - {fileID: 8923208229027355618, guid: 1ebbb856c8354184c83f96f00dcc3e20, type: 3}
+  - {fileID: 9010272952799943731, guid: 7f8db162d34a4b345b406bb6ae5c714d, type: 3}
+  - {fileID: 655360300991686480, guid: b4db92c90af040442893ae8d0e8dad98, type: 3}
+  borderRows: 3
+  borderSpacing: 6.5
+  borderRowGap: 7.5
+  borderScale: {x: 1.3, y: 2.1}
+  exitGapHalfWidth: 3.4
+  sideTrees:
+  - {fileID: 8521408192733139688, guid: 43360905efbff2b4bbb83aa0db269dfd, type: 3}
+  - {fileID: 4540809894737371721, guid: 496214a5473746b4ab69c9355e0f409a, type: 3}
+  - {fileID: 8451143442898917433, guid: db0f2dee7b5dea54c8bddbe73fc5c617, type: 3}
+  - {fileID: 278215404035128751, guid: 9a0ca89a2a77bc5489d678187ea84df0, type: 3}
+  - {fileID: 6701316424348625032, guid: 81c3c30f5426ffd44862878e2787857a, type: 3}
+  sideTreeScale: {x: 0.9, y: 1.4}
+  sideSpacing: 3.2
+  borderFill:
+  - {fileID: 4032907718888065065, guid: 2044d19d726e1c04a82bfc5ac2580a07, type: 3}
+  - {fileID: 4724652601270721619, guid: 645e4f2640ca1394ea3d8545bf0c20fb, type: 3}
+  - {fileID: 4827688026170545642, guid: d38c586cd8b946944b80e49222ed7b6f, type: 3}
+  - {fileID: 6701316424348625032, guid: 81c3c30f5426ffd44862878e2787857a, type: 3}
+  - {fileID: 3687889715272500597, guid: e4bb1a93e0e00b64ab87d67600b73962, type: 3}
+  - {fileID: 1624934613708217177, guid: 135cfa328d7fcb14abf14ee831d9d7d2, type: 3}
+  borderFillCount: 52
+  borderFillScale: {x: 1.3, y: 2.6}
+  openCameraSide: 1
+  lowBorder:
+  - {fileID: 9051000660223849285, guid: 1b6a25e2b4b751440bcaca922acf586f, type: 3}
+  - {fileID: 2172011278761168382, guid: 68b2ea95dbcf0794e8c3adbd84732e2f, type: 3}
+  - {fileID: 1702921548647229704, guid: 689fac6d74d3c14489caa0b674eed348, type: 3}
+  - {fileID: 8359377368601381781, guid: 334cf5a393551de42bcbe840720fa6b2, type: 3}
+  - {fileID: 7957923197996204286, guid: 23bf4b1cdde4b2b42b9ab9bca9fb4d51, type: 3}
+  - {fileID: 6600279710178241700, guid: 9d6328f70666e594ca046325eab10cca, type: 3}
+  - {fileID: 7551923686453774446, guid: 3aea1ccf60a7b1644be4d4bfab0de996, type: 3}
+  - {fileID: 417500146505356250, guid: 471afa96244d33d4daad0b46253bb73d, type: 3}
+  lowBorderCount: 38
+  lowBorderScale: {x: 0.7, y: 1.2}
+  sideBorderOutset: 4
+  enemyModels:
+  - {fileID: 1555847620765010, guid: 1159fbfcf2d66ee4b896abb3e41d47c4, type: 3}
+  - {fileID: 7359655724910758988, guid: a838ec8ea7d24c544b5e48e5aba36cdc, type: 3}
+  - {fileID: 391536099558741291, guid: 762b5bfe811b776459417e9e29cbab94, type: 3}
+  - {fileID: 1555847620765010, guid: 1159fbfcf2d66ee4b896abb3e41d47c4, type: 3}
+  championModels:
+  - {fileID: 1555847620765010, guid: 54f08473df2a94348a95272458da3885, type: 3}
+  - {fileID: 1390276149824892, guid: c5e7161780bfc06459e1d0fd1cefd777, type: 3}
+  bossModel: {fileID: 1390276149824892, guid: 6ee0769bd911abd4aad799c0b81cab00, type: 3}
+  bossScale: 2
+  bossName: "\uBC31\uACF0 \uC124\uC57C"
+  bossTitle: "\uC0B0\uC0AC\uC758 \uC218\uD638\uC790"
+  obstacles:
+  - {fileID: 4169096484274329770, guid: 3f12c5aeffadbfb48a73664c32368166, type: 3}
+  - {fileID: 4416698844278078833, guid: 4d00dbc1ac9ef304aa979e15efe8d2b6, type: 3}
+  - {fileID: 4309250480460552501, guid: 0972e91d6aa6fcb409e1fc902a432de4, type: 3}
+  - {fileID: 7875758413856042110, guid: af647d76f23bc46419ededb16a372014, type: 3}
+  - {fileID: 1481561816959580188, guid: 3efe9cf3044a4124c85a74c7bc17d893, type: 3}
+  - {fileID: 7957923197996204286, guid: 23bf4b1cdde4b2b42b9ab9bca9fb4d51, type: 3}
+  - {fileID: 1000010162874410, guid: 896b9aac1f0db4cc99919922db51bcff, type: 3}
+  obstacleCount: {x: 1, y: 3}
+  obstacleScale: {x: 0.7, y: 1.2}
+  obstacleClearFromEntry: 4.5
+  clutter:
+  - {fileID: 6109376910720859291, guid: 65c8119ca413f1d4387389e844fde9dd, type: 3}
+  - {fileID: 2192684222416585685, guid: 44ffa484624ba6e4384927e2bb2d1e7a, type: 3}
+  - {fileID: 9051000660223849285, guid: 1b6a25e2b4b751440bcaca922acf586f, type: 3}
+  - {fileID: 1702921548647229704, guid: 689fac6d74d3c14489caa0b674eed348, type: 3}
+  - {fileID: 8359377368601381781, guid: 334cf5a393551de42bcbe840720fa6b2, type: 3}
+  - {fileID: 7032201976474117930, guid: 7191b86395be0104bbefbf6f3353943b, type: 3}
+  - {fileID: 7800149648210378539, guid: 5f1c70eed4873ab4894814f35de56c2f, type: 3}
+  - {fileID: 1361286785624917855, guid: 8111aa994ce277e429aa9905e874315b, type: 3}
+  - {fileID: 1983316087493947635, guid: 2e981905c92222e4589f83e37f12dff8, type: 3}
+  - {fileID: 6561993311811163202, guid: 0f10ef46b0d432c40ad24bf3dfad01b4, type: 3}
+  - {fileID: 7252988990226198074, guid: 594d0276bda3be24ab66e3b82a3bf2fd, type: 3}
+  clutterCount: {x: 14, y: 22}
+  clutterScale: {x: 0.6, y: 1}
+  clutterClumps: 5
+  clutterClumpRadius: 1.8
+  clutterStrayRatio: 0.35
+  stripColliders: 1
+  staticBatch: 1

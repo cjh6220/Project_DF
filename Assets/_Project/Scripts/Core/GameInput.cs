@@ -1,0 +1,198 @@
+using System;
+using UnityEngine;
+using UnityEngine.InputSystem;
+using UnityEngine.InputSystem.DualShock;
+using UnityEngine.InputSystem.Utilities;
+
+namespace Proto.Core
+{
+    public enum InputScheme { Keyboard, PlayStation, Xbox }
+
+    /// <summary>
+    /// 게임의 모든 입력을 한곳에 모은다. 키보드와 패드를 같은 동작으로 묶는다.
+    ///
+    ///   동작        키보드          패드 (PS / Xbox)
+    ///   이동        방향키          왼쪽 스틱 · 십자키
+    ///   기본 공격   X               □ / X
+    ///   스킬        Z               △ / Y      — 커맨드는 방향 + Z 또는 방향 + X
+    ///   채굴        C (누르고 있기)  × / A
+    ///   대화·확인   Space · C       × / A
+    ///   닫기·취소   Esc             ○ / B
+    ///   메뉴        Esc             OPTIONS / Menu
+    ///   퀵슬롯 1~4  A S D F         R1 / RB 누른 채 □ △ ○ ×
+    ///   트리 이동   (드래그)        오른쪽 스틱,  확대·축소 L2/R2
+    ///
+    /// 마지막으로 만진 장치를 기억해 화면의 버튼 표시(Glyph)를 바꾼다.
+    /// 키 바꾸기 기능을 붙일 때도 여기만 고치면 된다.
+    /// </summary>
+    public static class GameInput
+    {
+        public static InputAction Move { get; private set; }
+        public static InputAction Attack { get; private set; }
+        public static InputAction Skill { get; private set; }
+        public static InputAction Mine { get; private set; }
+        public static InputAction Interact { get; private set; }
+        public static InputAction Cancel { get; private set; }
+        public static InputAction Menu { get; private set; }
+        public static InputAction Pan { get; private set; }
+        public static InputAction ZoomIn { get; private set; }
+        public static InputAction ZoomOut { get; private set; }
+        public static InputAction SlotChord { get; private set; }
+        static InputAction[] _slotKeys, _slotFace;
+
+        public static InputScheme Scheme { get; private set; } = InputScheme.Keyboard;
+        /// <summary>바뀐 장치의 이름 ("듀얼센스", "Xbox 패드", "키보드"). 전환 알림에 쓴다.</summary>
+        public static string DeviceName { get; private set; } = "키보드";
+        public static event Action SchemeChanged;
+
+        static bool _built;
+
+        public static void Ensure()
+        {
+            if (_built) return;
+            _built = true;
+
+            Move = new InputAction("Move", InputActionType.Value);
+            Move.AddCompositeBinding("2DVector")
+                .With("Up", "<Keyboard>/upArrow").With("Down", "<Keyboard>/downArrow")
+                .With("Left", "<Keyboard>/leftArrow").With("Right", "<Keyboard>/rightArrow");
+            Move.AddBinding("<Gamepad>/leftStick");
+            Move.AddBinding("<Gamepad>/dpad");
+
+            Attack = Button("Attack", "<Keyboard>/x", "<Gamepad>/buttonWest");
+            Skill = Button("Skill", "<Keyboard>/z", "<Gamepad>/buttonNorth");
+            Mine = Button("Mine", "<Keyboard>/c", "<Gamepad>/buttonSouth");
+            Interact = Button("Interact", "<Keyboard>/space", "<Keyboard>/c", "<Keyboard>/enter", "<Gamepad>/buttonSouth");
+            Cancel = Button("Cancel", "<Keyboard>/escape", "<Gamepad>/buttonEast");
+            Menu = Button("Menu", "<Keyboard>/escape", "<Gamepad>/start");
+            SlotChord = Button("SlotChord", "<Gamepad>/rightShoulder");
+
+            Pan = new InputAction("Pan", InputActionType.Value);
+            Pan.AddBinding("<Gamepad>/rightStick");
+            ZoomIn = Button("ZoomIn", "<Gamepad>/rightTrigger");
+            ZoomOut = Button("ZoomOut", "<Gamepad>/leftTrigger");
+
+            _slotKeys = new[]
+            {
+                Button("Slot1", "<Keyboard>/a"), Button("Slot2", "<Keyboard>/s"),
+                Button("Slot3", "<Keyboard>/d"), Button("Slot4", "<Keyboard>/f"),
+            };
+            _slotFace = new[]
+            {
+                Button("SlotFace1", "<Gamepad>/buttonWest"), Button("SlotFace2", "<Gamepad>/buttonNorth"),
+                Button("SlotFace3", "<Gamepad>/buttonEast"), Button("SlotFace4", "<Gamepad>/buttonSouth"),
+            };
+
+            foreach (var a in All()) a.Enable();
+            InputSystem.onActionChange += OnActionChange;
+            // 게임에서 안 쓰는 버튼(L1, 터치패드 등)이라도 눌리면 바로 그 장치로 바꾼다
+            InputSystem.onAnyButtonPress.Call(ctrl => Detect(ctrl.device));
+        }
+
+        static InputAction Button(string name, params string[] paths)
+        {
+            var a = new InputAction(name, InputActionType.Button);
+            foreach (var p in paths) a.AddBinding(p);
+            return a;
+        }
+
+        static System.Collections.Generic.IEnumerable<InputAction> All()
+        {
+            yield return Move; yield return Attack; yield return Skill; yield return Mine;
+            yield return Interact; yield return Cancel; yield return Menu; yield return SlotChord;
+            yield return Pan; yield return ZoomIn; yield return ZoomOut;
+            foreach (var a in _slotKeys) yield return a;
+            foreach (var a in _slotFace) yield return a;
+        }
+
+        // ───────────────────────────── 읽기 ─────────────────────────────
+
+        /// <summary>R1을 누르고 있으면 얼굴 버튼은 퀵슬롯이 된다. 그동안 공격·스킬·닫기는 안 나간다.</summary>
+        public static bool ChordHeld { get { Ensure(); return SlotChord.IsPressed(); } }
+
+        public static bool AttackPressed { get { Ensure(); return Attack.WasPressedThisFrame() && !ChordHeld; } }
+        public static bool SkillPressed { get { Ensure(); return Skill.WasPressedThisFrame() && !ChordHeld; } }
+        public static bool MinePressed { get { Ensure(); return Mine.WasPressedThisFrame() && !ChordHeld; } }
+        public static bool MineHeld { get { Ensure(); return Mine.IsPressed(); } }
+        public static bool InteractPressed { get { Ensure(); return Interact.WasPressedThisFrame() && !ChordHeld; } }
+        public static bool CancelPressed { get { Ensure(); return Cancel.WasPressedThisFrame() && !ChordHeld; } }
+        public static bool MenuPressed { get { Ensure(); return Menu.WasPressedThisFrame(); } }
+        public static Vector2 MoveValue { get { Ensure(); return Move.ReadValue<Vector2>(); } }
+
+        /// <summary>이번 프레임에 눌린 퀵슬롯 번호 (0~3). 없으면 -1.</summary>
+        public static int SlotPressed()
+        {
+            Ensure();
+            for (int i = 0; i < _slotKeys.Length; i++) if (_slotKeys[i].WasPressedThisFrame()) return i;
+            if (ChordHeld)
+                for (int i = 0; i < _slotFace.Length; i++) if (_slotFace[i].WasPressedThisFrame()) return i;
+            return -1;
+        }
+
+        // 메뉴 이동 — 처음 한 번, 누르고 있으면 반복
+        static Vector2Int _navHeld;
+        static float _navNext;
+
+        /// <summary>
+        /// 메뉴에서 쓰는 방향 입력. 스틱은 4방향으로 끊고, 꾹 누르면 일정 간격으로 반복한다.
+        /// 한 프레임에 한 번만 불러야 한다.
+        /// </summary>
+        public static Vector2Int Navigate()
+        {
+            var v = MoveValue;
+            Vector2Int d = Vector2Int.zero;
+            if (v.magnitude > 0.5f)
+                d = Mathf.Abs(v.x) > Mathf.Abs(v.y) ? new Vector2Int(v.x > 0 ? 1 : -1, 0) : new Vector2Int(0, v.y > 0 ? 1 : -1);
+
+            if (d == Vector2Int.zero) { _navHeld = d; return d; }
+            float now = Time.unscaledTime;
+            if (d != _navHeld) { _navHeld = d; _navNext = now + 0.35f; return d; }
+            if (now >= _navNext) { _navNext = now + 0.11f; return d; }
+            return Vector2Int.zero;
+        }
+
+        // ───────────────────────────── 장치 감지 ─────────────────────────────
+
+        static void OnActionChange(object obj, InputActionChange change)
+        {
+            if (change != InputActionChange.ActionPerformed || !(obj is InputAction a)) return;
+            var ctrl = a.activeControl;
+            if (ctrl == null) return;
+            // 스틱이 살짝 흔들린 것으로 표시가 바뀌면 안 된다
+            if (a.type == InputActionType.Value && ctrl.EvaluateMagnitude() < 0.5f) return;
+
+            Detect(ctrl.device);
+        }
+
+        static void Detect(InputDevice device)
+        {
+            if (device == null) return;
+            InputScheme s;
+            string name;
+            if (device is Gamepad)
+            {
+                if (device is DualShockGamepad)
+                {
+                    s = InputScheme.PlayStation;
+                    name = device.GetType().Name.Contains("DualSense") ? "듀얼센스" : "듀얼쇼크 4";
+                }
+                else { s = InputScheme.Xbox; name = "Xbox 패드"; }
+            }
+            else if (device is Keyboard || device is Mouse) { s = InputScheme.Keyboard; name = "키보드"; }
+            else return;
+
+            if (s == Scheme) return;
+            Scheme = s;
+            DeviceName = name;
+            SchemeChanged?.Invoke();
+        }
+
+        /// <summary>테스트용 — 패드 없이 버튼 표시를 확인한다.</summary>
+        public static void ForceScheme(InputScheme s)
+        {
+            Scheme = s;
+            DeviceName = s == InputScheme.PlayStation ? "듀얼센스" : s == InputScheme.Xbox ? "Xbox 패드" : "키보드";
+            SchemeChanged?.Invoke();
+        }
+    }
+}

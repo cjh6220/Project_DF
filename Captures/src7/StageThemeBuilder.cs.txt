@@ -1,0 +1,278 @@
+#if UNITY_EDITOR
+using System.Collections.Generic;
+using UnityEditor;
+using UnityEngine;
+using Proto.Data;
+
+namespace Proto.EditorTools
+{
+    /// <summary>
+    /// 스테이지 테마 에셋을 프리팹 폴더에서 자동으로 채운다.
+    /// 메뉴: Proto ▸ Build Stage 1 Theme (Forest)
+    ///
+    /// 프리팹 60여 개를 손으로 끌어다 넣는 건 실수하기 쉽고,
+    /// 에셋 팩을 갈아끼울 때마다 다시 해야 한다. 이름 규칙으로 뽑는다.
+    /// </summary>
+    public static class StageThemeBuilder
+    {
+        const string Nature = "Assets/polyperfect/Poly Universal Pack/- Prefabs/Nature";
+        const string ThemePath = "Assets/_Project/Data/Stage1_Forest.asset";
+
+        [MenuItem("Proto/Build Stage 1 Theme (Forest)")]
+        public static StageTheme Build()
+        {
+            var theme = AssetDatabase.LoadAssetAtPath<StageTheme>(ThemePath);
+            if (theme == null)
+            {
+                theme = ScriptableObject.CreateInstance<StageTheme>();
+                System.IO.Directory.CreateDirectory("Assets/_Project/Data");
+                AssetDatabase.CreateAsset(theme, ThemePath);
+            }
+
+            theme.stageName = "숲";
+
+            // 바닥 — 단색 큐브가 "지저분하다"의 절반이다. 타일링 텍스처를 깐다.
+            theme.groundMaterial = BuildGroundMaterial();
+            theme.groundTileSize = 3f;
+
+            // 색 — 침엽수 숲 바닥, 초록빛 안개
+            theme.groundColor = new Color(0.30f, 0.46f, 0.20f);
+            theme.wallColor   = new Color(0.08f, 0.11f, 0.08f);
+
+            // 나무 사이로 보이는 먼 곳이 밝아야 숲에 깊이가 생긴다.
+            // 어두운 안개는 벽으로 보이고, 밝은 안개는 '저 너머'로 보인다.
+            // 카메라가 18m 뒤 + 9m 위에 있다. 플레이 필드까지 13~24m, 뒷벽이 25~30m다.
+            // 안개를 24m 아래에서 시작하면 캐릭터와 바닥까지 뿌예진다 — 실제로 그랬다.
+            theme.useFog      = true;
+            theme.fogColor    = new Color(0.72f, 0.82f, 0.76f);
+            theme.fogStart    = 25f;
+            theme.fogEnd      = 48f;
+            theme.skyColor    = new Color(0.74f, 0.84f, 0.78f);
+            theme.ambientColor = new Color(0.52f, 0.56f, 0.46f);
+            theme.sunColor     = new Color(1f, 0.97f, 0.86f);
+
+            // 경계 — 다 자란 침엽수 위주. 활엽수를 섞어 실루엣을 흐트러뜨린다.
+            // 뒷벽은 거대한 나무 몇 그루다. 중간 나무를 촘촘히 세우면 울타리로 보이고,
+            // 거대한 줄기 몇 개가 화면 밖으로 뻗어야 '숲 속'으로 읽힌다.
+            theme.borderTrees = Pick("Trees", new[] {
+                "tree-sequoia-mature-a", "tree-jungle-mature-a", "tree-baobab-mature-a",
+                "tree-oak-mature-a", "tree-beech-mature-a", "tree-mangrove-mature-a"
+            });
+            theme.borderRows = 3;
+            theme.borderSpacing = 6.5f;      // 줄기 사이로 먼 곳이 보이도록 넓게
+            theme.borderRowGap = 7.5f;       // 뒤로 갈수록 안개가 먹어서 깊이가 생긴다
+            theme.borderScale = new Vector2(1.3f, 2.1f);
+            theme.exitGapHalfWidth = 3.4f;
+
+            // 동·서 변 — 거대 나무는 폭이 20m라 옆에 못 쓴다. 한 단계 작은 것으로.
+            theme.sideTrees = Pick("Trees", new[] {
+                "tree-spruce-mature-a", "tree-pine-mature-a", "tree-birch-mature-a",
+                "tree-birch-mature-b", "tree-poplar-mature-a", "tree-juniper-mature-a"
+            });
+            theme.sideTreeScale = new Vector2(0.9f, 1.4f);
+            theme.sideSpacing = 3.2f;
+
+            theme.borderFill = Pick("Bushes", new[] {
+                "bush-yew-mature-a", "bush-yew-mature-b", "bush-yew-mature-c",
+                "bush-blackberry-mature-a", "bush-blackberry-mature-b",
+                "bush-knee-timber-mature-a"
+            });
+            Append(ref theme.borderFill, Pick("Trees", new[] {
+                "tree-spruce-sapling-a", "tree-pine-sapling-a", "tree-juniper-sapling-a"
+            }));
+            theme.borderFillCount = 52;
+            theme.borderFillScale = new Vector2(1.3f, 2.6f);
+
+            // 카메라 쪽(남쪽) 변 — 캐릭터를 가리지 않는 낮은 것만
+            theme.openCameraSide = true;
+            // 전부 1m 안쪽이어야 한다. rock-c/d 는 4~6m짜리 바위라 여기 쓰면 안 된다.
+            theme.lowBorder = Pick("Grass", new[] {
+                "grass-fern-mature-a", "grass-fern-mature-b",
+                "grass-middle-a", "grass-middle-b", "grass-middle-c"
+            });
+            Append(ref theme.lowBorder, Pick("Bushes", new[] {
+                "bush-yew-mature-a", "bush-yew-mature-b", "bush-yew-mature-c",
+                "bush-blackberry-mature-a", "bush-blackberry-mature-b",
+                "moss-simple-a", "moss-simple-c"
+            }));
+            Append(ref theme.lowBorder, Pick("Rocks", new[] {
+                "stone-c", "stone-d", "stone-e", "stone-f",
+                "ground-stones-a", "ground-stones-b", "ground-stones-c", "ground-stones-d"
+            }));
+            Append(ref theme.lowBorder, Pick("Trees", new[] {
+                "tree-pine-stump-a", "tree-spruce-stump-a",
+                "wood-log-a", "wood-log-b", "wood-log-c", "wood-log-d"
+            }));
+            theme.lowBorderCount = 38;
+            theme.lowBorderScale = new Vector2(0.7f, 1.2f);
+
+            // 몬스터 — 숲에는 해골보다 짐승이 맞는다.
+            // 동물 팩은 모델마다 전용 애니메이터가 딸려 오므로 그대로 쓴다.
+            theme.enemyModels = Animals(new[] { "Wolf Grey", "Wolf Black", "Boar", "Spider Red", "Spider Green" });
+            theme.championModels = Animals(new[] { "Bear", "Tiger", "Boar", "Wolf Black" });
+
+            // 보스 — 챔피언과 겹치지 않는 덩치. 가슴 두드리기 모션이 등장·분노 연출이 된다.
+            theme.bossModel = Animals(new[] { "Gorilla Silver" })[0];
+            theme.bossScale = 2.0f;
+            theme.bossName = "실버백";
+            theme.bossTitle = "숲의 주인";
+
+            // 방 안 지형물 — 시선을 끊는 큰 것
+            // 전부 1m 안쪽이어야 한다. rock-c~g 는 3~5m짜리 바위라
+            // 방 한가운데 서면 캐릭터를 통째로 덮는다.
+            theme.obstacles = Pick("Rocks", new[] {
+                "menhir-flat-a", "menhir-flat-b", "menhir-flat-c",
+                "ground-stones-a", "ground-stones-b", "ground-stones-c", "ground-stones-d"
+            });
+            Append(ref theme.obstacles, Pick("Trees", new[] {
+                "tree-spruce-stump-a", "tree-pine-stump-a", "tree-beech-stump-a", "tree-oak-stump-a",
+                "tree-spruce-fallen-a", "tree-pine-fallen-a", "tree-beech-fallen-a",
+                "tree-oak-log-a", "tree-pine-log-pile-a", "tree-spruce-log-pile-a"
+            }));
+            // 소품은 '몇 개 놓인 것'이어야 한다. 레퍼런스에도 통 하나, 꽃 몇 송이뿐이다.
+            theme.obstacleCount = new Vector2Int(1, 3);
+            theme.obstacleScale = new Vector2(0.7f, 1.2f);
+            theme.obstacleClearFromEntry = 4.5f;
+
+            // 잡초 — 바닥을 덮는 작은 것
+            var clutter = new List<GameObject>();
+            // grass-big / reed 는 1m 가까이 올라와 캐릭터 발밑을 가린다. 뺀다.
+            clutter.AddRange(Pick("Grass", new[] {
+                "grass-small-a", "grass-small-b", "grass-small-c",
+                "grass-middle-a", "grass-middle-b", "grass-middle-c",
+                "grass-fern-mature-a", "grass-fern-mature-b"
+            }));
+            clutter.AddRange(Pick("Flowers", new[] {
+                "flower-daisy-mature-a", "flower-daisy-single-mature-a",
+                "flower-dandelion-mature-a", "flower-dandelion-single-mature-a",
+                "flower-poppy-mature-a", "flower-random-mature-a"
+            }));
+            clutter.AddRange(Pick("Mushrooms", null));
+            clutter.AddRange(Pick("Bushes", new[] {
+                "moss-simple-a", "moss-simple-b", "moss-simple-c", "moss-simple-d", "moss-simple-e",
+                "leaves-bunch-a", "leaves-bunch-b", "leaves-bunch-c"
+            }));
+            clutter.AddRange(Pick("Trees", new[] { "twig-a", "twig-b", "twig-c", "twig-d", "twig-e" }));
+            clutter.AddRange(Pick("Rocks", new[] {
+                "stone-a", "stone-b", "stone-c", "stone-d", "ground-stones-a", "ground-stones-b"
+            }));
+            theme.clutter = clutter.ToArray();
+            // 잔디밭은 깨끗해야 캐릭터와 몬스터가 읽힌다.
+            // 레퍼런스의 바닥에는 꽃 몇 송이와 작은 풀 뭉치뿐이고, 나머지는 텍스처가 한다.
+            theme.clutterCount = new Vector2Int(16, 26);
+            theme.clutterScale = new Vector2(0.6f, 1.0f);
+            theme.clutterClumps = 5;
+            theme.clutterClumpRadius = 1.8f;
+            theme.clutterStrayRatio = 0.35f;
+
+            theme.stripColliders = true;
+            theme.staticBatch = true;
+
+            EditorUtility.SetDirty(theme);
+            AssetDatabase.SaveAssets();
+
+            Debug.Log($"[Proto] 숲 테마 생성 — 경계 나무 {theme.borderTrees.Length} / 채움 {theme.borderFill.Length} / " +
+                      $"카메라쪽 낮은것 {theme.lowBorder.Length} / 지형물 {theme.obstacles.Length} / 잡초 {theme.clutter.Length} / "
+                    + $"몬스터 {theme.enemyModels.Length}종, 챔피언 {theme.championModels.Length}종");
+            return theme;
+        }
+
+        /// <summary>
+        /// 숲 바닥 머티리얼. 팩에 있는 잔디 텍스처를 타일링해서 쓴다.
+        /// </summary>
+        static Material BuildGroundMaterial()
+        {
+            const string dir = "Assets/_Project/Materials";
+            const string path = dir + "/Forest Ground.mat";
+
+            var mat = AssetDatabase.LoadAssetAtPath<Material>(path);
+            if (mat == null)
+            {
+                System.IO.Directory.CreateDirectory(dir);
+                mat = new Material(Shader.Find("Universal Render Pipeline/Lit"));
+                AssetDatabase.CreateAsset(mat, path);
+            }
+
+            var albedo = AssetDatabase.LoadAssetAtPath<Texture2D>(
+                "Assets/polyperfect/Low Poly Animated Animals/- Textures/Terrain/Ground-grass_COL_256.png");
+            var normal = AssetDatabase.LoadAssetAtPath<Texture2D>(
+                "Assets/polyperfect/Low Poly Animated Animals/- Textures/Terrain/Terrain_N_256.png");
+
+            if (albedo != null) mat.SetTexture("_BaseMap", albedo);
+            if (normal != null)
+            {
+                // 노멀맵으로 임포트되어 있어야 한다
+                var ni = AssetImporter.GetAtPath(AssetDatabase.GetAssetPath(normal)) as TextureImporter;
+                if (ni != null && ni.textureType != TextureImporterType.NormalMap)
+                {
+                    ni.textureType = TextureImporterType.NormalMap;
+                    ni.SaveAndReimport();
+                }
+                mat.SetTexture("_BumpMap", normal);
+                mat.EnableKeyword("_NORMALMAP");
+                mat.SetFloat("_BumpScale", 0.35f);
+            }
+
+            mat.SetColor("_BaseColor", new Color(0.78f, 0.92f, 0.62f));  // 밝은 잔디밭
+            mat.SetFloat("_Smoothness", 0.05f);
+            mat.SetFloat("_Metallic", 0f);
+
+            EditorUtility.SetDirty(mat);
+            AssetDatabase.SaveAssets();
+            return mat;
+        }
+
+        const string AnimalFolder = "Assets/polyperfect/Low Poly Animated Animals/- Prefabs/Animals";
+
+        static GameObject[] Animals(string[] names)
+        {
+            var found = new List<GameObject>();
+            var missing = new List<string>();
+            foreach (var n in names)
+            {
+                var go = AssetDatabase.LoadAssetAtPath<GameObject>(AnimalFolder + "/" + n + ".prefab");
+                if (go != null) found.Add(go); else missing.Add(n);
+            }
+            if (missing.Count > 0)
+                Debug.LogWarning("[Proto] 동물을 못 찾음: " + string.Join(", ", missing));
+            return found.ToArray();
+        }
+
+        /// <summary>names가 null이면 폴더 전체.</summary>
+        static GameObject[] Pick(string subFolder, string[] names)
+        {
+            string folder = Nature + "/" + subFolder;
+            var found = new List<GameObject>();
+            var missing = new List<string>();
+
+            if (names == null)
+            {
+                foreach (var g in AssetDatabase.FindAssets("t:Prefab", new[] { folder }))
+                {
+                    var p = AssetDatabase.GUIDToAssetPath(g);
+                    if (System.IO.Path.GetDirectoryName(p).Replace('\\', '/') != folder) continue;
+                    var go = AssetDatabase.LoadAssetAtPath<GameObject>(p);
+                    if (go != null) found.Add(go);
+                }
+                return found.ToArray();
+            }
+
+            foreach (var n in names)
+            {
+                var go = AssetDatabase.LoadAssetAtPath<GameObject>(folder + "/" + n + ".prefab");
+                if (go != null) found.Add(go); else missing.Add(n);
+            }
+            if (missing.Count > 0)
+                Debug.LogWarning($"[Proto] {subFolder}에서 못 찾음: {string.Join(", ", missing)}");
+            return found.ToArray();
+        }
+
+        static void Append(ref GameObject[] target, GameObject[] extra)
+        {
+            var l = new List<GameObject>(target);
+            l.AddRange(extra);
+            target = l.ToArray();
+        }
+    }
+}
+#endif

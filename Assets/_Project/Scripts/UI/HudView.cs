@@ -49,6 +49,7 @@ namespace Proto.UI
             };
 
             RefreshLoot();
+            HudSkin.Apply(transform);   // 새 UI 그림 입히기
         }
 
         void RefreshLoot()

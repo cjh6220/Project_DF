@@ -1,0 +1,46 @@
+using UnityEngine;
+
+namespace Proto.Data
+{
+    /// <summary>
+    /// 던전 하나. 마을 도리이에 들어가면 뜨는 던전 선택 창의 카드 한 장이 이것이다.
+    ///
+    ///   겉모습   StageTheme — 바닥·안개·나무·몬스터·보스
+    ///   포털 색  고르면 도리이 소용돌이가 이 색으로 바뀐다
+    ///   난이도   기본 튜닝값에 곱한다. 성장(노드)과 겹쳐도 매 판 원본에서 다시 계산한다
+    ///   보상     처치·채굴로 얻는 양에 곱한다
+    ///
+    /// 열림 조건은 순서다. 앞 던전의 보스를 한 번 잡으면 다음 던전이 열린다.
+    /// </summary>
+    [CreateAssetMenu(fileName = "Dungeon", menuName = "Proto/Dungeon")]
+    public class DungeonDef : ScriptableObject
+    {
+        [Header("── 이름 ──")]
+        public string id = "forest";
+        public string displayName = "시작의 숲";
+        [Tooltip("카드 아래 한 줄 — 어떤 곳인지")]
+        public string subtitle = "짐승이 사는 숲";
+        [TextArea(2, 4)] public string description = "";
+
+        [Header("── 겉모습 ──")]
+        public StageTheme theme;
+
+        [Header("── 포털 색 ──")]
+        [Tooltip("소용돌이의 주 색")]
+        public Color portalColor = new Color(0.42f, 0.10f, 0.95f);
+        [Tooltip("중심·테두리의 밝은 색")]
+        public Color portalAccent = new Color(1f, 0.6f, 1f);
+
+        [Header("── 난이도 (기본값에 곱한다) ──")]
+        [Tooltip("카드에 표시하는 위험도 (1~4)")]
+        [Range(1, 4)] public int danger = 1;
+        public float enemyHealthMul = 1f;
+        public float enemyDamageMul = 1f;
+        public float bossHealthMul = 1f;
+        public float bossDamageMul = 1f;
+
+        [Header("── 보상 ──")]
+        [Tooltip("처치·채굴로 얻는 자원에 곱한다")]
+        public float rewardMul = 1f;
+    }
+}

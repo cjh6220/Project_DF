@@ -1,0 +1,144 @@
+using UnityEngine;
+
+namespace Proto.Town
+{
+    /// <summary>
+    /// 마을 가운데 문. 플레이어가 걸어 들어가면 던전 선택 창이 뜬다.
+    /// 문 안쪽 소용돌이와 불빛이 천천히 숨 쉰다 — 멀리서도 "저기가 입구"로 읽히게.
+    ///
+    /// 포털 색은 던전마다 다르다. 선택 창에서 카드를 옮길 때마다 소용돌이·바닥 마법진·
+    /// 빛 알갱이·불빛이 그 던전 색으로 부드럽게 넘어간다.
+    /// </summary>
+    [RequireComponent(typeof(Collider))]
+    public class VillageGate : MonoBehaviour
+    {
+        [SerializeField] VillageController village;
+        [SerializeField] Transform swirl;
+        [SerializeField] Light glow;
+        [SerializeField] float glowBase = 2.2f;
+
+        [Header("포털 색을 바꿀 대상")]
+        [SerializeField] Renderer surface;
+        [SerializeField] Renderer floorGlow;
+        [SerializeField] Renderer rune;
+        [SerializeField] ParticleSystem[] particles;
+        [Tooltip("색이 넘어가는 시간(초)")]
+        [SerializeField] float blendTime = 0.45f;
+
+        [Header("바닥 마법진")]
+        [SerializeField] float runeSpin = 4f;
+        [SerializeField] float runeBase = 1.4f;
+
+        static readonly int IdDeep = Shader.PropertyToID("_ColorDeep");
+        static readonly int IdMid = Shader.PropertyToID("_ColorMid");
+        static readonly int IdCore = Shader.PropertyToID("_ColorCore");
+        static readonly int IdRim = Shader.PropertyToID("_RimColor");
+        static readonly int IdBase = Shader.PropertyToID("_BaseColor");
+
+        MaterialPropertyBlock _mpb;
+        Color _fromMain, _fromAccent, _toMain, _toAccent, _main, _accent;
+        float _blendT = 1f;
+        bool _hasColor;
+        float _flare;   // 들어설 때 마법진이 번쩍인다
+
+        void OnTriggerEnter(Collider other) => Try(other);
+        void OnTriggerStay(Collider other) => Try(other);
+        void OnTriggerExit(Collider other)
+        {
+            if (village != null && other.CompareTag("Player")) village.OnGateExited();
+        }
+
+        void Try(Collider other)
+        {
+            if (village != null && other.CompareTag("Player")) village.OnGateEntered();
+        }
+
+        /// <summary>포털을 이 색으로 바꾼다. instant면 바로, 아니면 부드럽게.</summary>
+        public void SetPalette(Color main, Color accent, bool instant = false)
+        {
+            if (!_hasColor || instant)
+            {
+                _main = _fromMain = _toMain = main;
+                _accent = _fromAccent = _toAccent = accent;
+                _blendT = 1f; _hasColor = true; _painted = false;
+                Paint();
+                return;
+            }
+            if (main == _toMain && accent == _toAccent) return;
+            _fromMain = _main; _fromAccent = _accent;
+            _toMain = main; _toAccent = accent;
+            _blendT = 0f;
+        }
+
+        /// <summary>던전을 골랐다 — 마법진이 크게 번쩍인다.</summary>
+        public void Flare() => _flare = 1f;
+
+        void Update()
+        {
+            if (swirl != null) swirl.Rotate(0f, 0f, -40f * Time.deltaTime, Space.Self);
+            float breathe = 0.85f + 0.15f * Mathf.Sin(Time.time * 2.4f);
+            _flare = Mathf.MoveTowards(_flare, 0f, Time.unscaledDeltaTime * 1.4f);
+            if (glow != null) glow.intensity = glowBase * breathe * (1f + _flare * 1.5f);
+
+            if (rune != null) rune.transform.Rotate(0f, runeSpin * Time.deltaTime, 0f, Space.World);
+
+            if (_hasColor && _blendT < 1f)
+            {
+                _blendT = Mathf.Min(1f, _blendT + Time.unscaledDeltaTime / Mathf.Max(0.01f, blendTime));
+                float k = 1f - (1f - _blendT) * (1f - _blendT);
+                _main = Color.Lerp(_fromMain, _toMain, k);
+                _accent = Color.Lerp(_fromAccent, _toAccent, k);
+            }
+            if (_hasColor) Paint();
+        }
+
+        /// <summary>
+        /// 주 색 하나와 밝은 색 하나로 포털 전체를 칠한다.
+        /// 깊은 곳은 주 색을 아주 어둡게, 테두리·중심은 밝은 색을 1 넘게 — 블룸이 걸린다.
+        /// </summary>
+        void Paint()
+        {
+            _mpb ??= new MaterialPropertyBlock();
+            float breathe = 0.85f + 0.15f * Mathf.Sin(Time.time * 2.4f);
+
+            if (surface != null)
+            {
+                surface.GetPropertyBlock(_mpb);
+                _mpb.SetColor(IdDeep, _main * 0.07f);
+                _mpb.SetColor(IdMid, _main);
+                _mpb.SetColor(IdCore, _accent * 1.6f);
+                _mpb.SetColor(IdRim, _accent * 1.8f + _main * 0.2f);
+                surface.SetPropertyBlock(_mpb);
+            }
+            if (floorGlow != null)
+            {
+                floorGlow.GetPropertyBlock(_mpb);
+                var c = Color.Lerp(_main, _accent, 0.25f); c.a = 0.7f;
+                _mpb.SetColor(IdBase, c);
+                floorGlow.SetPropertyBlock(_mpb);
+            }
+            if (rune != null)
+            {
+                rune.GetPropertyBlock(_mpb);
+                var c = Color.Lerp(_main, _accent, 0.45f) * runeBase * (0.8f + 0.2f * breathe) * (1f + _flare * 2.2f);
+                c.a = 1f;
+                _mpb.SetColor(IdBase, c);
+                rune.SetPropertyBlock(_mpb);
+            }
+            if (particles != null && (_blendT < 1f || !_painted))
+            {
+                foreach (var ps in particles)
+                {
+                    if (ps == null) continue;
+                    var m = ps.main;
+                    m.startColor = new ParticleSystem.MinMaxGradient(
+                        Color.Lerp(_main, Color.white, 0.25f), Color.Lerp(_accent, Color.white, 0.2f));
+                }
+                _painted = true;
+            }
+            if (glow != null) glow.color = Color.Lerp(_main, _accent, 0.35f);
+        }
+
+        bool _painted;
+    }
+}

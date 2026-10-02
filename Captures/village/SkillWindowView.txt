@@ -1,0 +1,214 @@
+using System;
+using UnityEngine;
+using UnityEngine.UI;
+using UnityEngine.InputSystem;
+using TMPro;
+using Proto.Core;
+
+namespace Proto.UI
+{
+    /// <summary>
+    /// 스킬 창 — 마을 오른쪽 스킬 관리 NPC가 연다.
+    ///
+    /// 지금은 보기 전용이다. 스킬 12종의 커맨드와 해금 조건을 보여 준다.
+    /// 스킬 포인트(SP) 강화와 단축키 등록은 스킬 시스템을 만들 때 여기에 붙인다.
+    /// (기획: 스킬-목록.md — 장착 없음, 배운 스킬은 전부 사용, SP로 강화)
+    /// </summary>
+    public class SkillWindowView : MonoBehaviour
+    {
+        [SerializeField] RunManager run;
+
+        public bool IsOpen => _root != null && _root.gameObject.activeSelf;
+        public event Action Closed;
+
+        struct Skill
+        {
+            public string Name, Cmd, Role, Icon;
+            public bool Starter;
+            public ResourceId Cost; public int Amount; public bool Ultimate;
+            public Skill(string n, string c, string r, string i, bool s, ResourceId cost = ResourceId.Core, int amt = 0, bool ult = false)
+            { Name = n; Cmd = c; Role = r; Icon = i; Starter = s; Cost = cost; Amount = amt; Ultimate = ult; }
+        }
+
+        static readonly Skill[] Skills =
+        {
+            new Skill("돌진베기",   "→ L",    "접근 · 이동",     "skill_dash_slash",     true),
+            new Skill("올려베기",   "↑ L",    "띄우기 · 콤보",   "skill_rising_slash",   true),
+            new Skill("내려찍기",   "↓ L",    "다운 · 전방 범위", "skill_ground_slam",    false, ResourceId.Core, 2),
+            new Skill("회전베기",   "↓↑ L",   "광역 · 탈출",     "skill_whirlwind",      false, ResourceId.Core, 2),
+            new Skill("연속 찌르기", "→→ L",   "경직 고정",       "skill_rapid_thrusts",  false, ResourceId.Core, 2),
+            new Skill("검기 날리기", "←→ L",   "원거리 · 관통",   "skill_sword_wave",     false, ResourceId.Core, 4),
+            new Skill("발도술",     "↓→ L",   "보스 딜 · 단일",  "skill_iaido",          false, ResourceId.Core, 4),
+            new Skill("반격 자세",   "← L",    "되받아치기",      "skill_counter_stance", false, ResourceId.Core, 4),
+            new Skill("전투 함성",   "↑↓ L",   "버프",            "skill_war_cry",        false, ResourceId.Core, 4),
+            new Skill("광맥 파쇄",   "↓↓ L",   "채굴",            "skill_ore_shatter",    false, ResourceId.Crystal, 3),
+            new Skill("질주",       "←← L",   "탐험 · 피로도",   "skill_sprint",         false, ResourceId.Ore, 10),
+            new Skill("대지 가르기", "↓→↑ L",  "궁극기",          "skill_earth_splitter", false, ResourceId.Core, 8, true),
+        };
+
+        static readonly Color ColPanel = new Color(0.08f, 0.06f, 0.12f, 0.97f);
+        static readonly Color ColBorder = new Color(0.86f, 0.64f, 0.30f, 1f);
+        static readonly Color ColCard = new Color(0.13f, 0.10f, 0.19f, 0.95f);
+        static readonly Color ColGold = new Color(1f, 0.80f, 0.42f, 1f);
+        static readonly Color ColSteel = new Color(0.46f, 0.44f, 0.54f, 1f);
+        static readonly Color ColMuted = new Color(0.62f, 0.59f, 0.70f, 1f);
+
+        RectTransform _root;
+        TextMeshProUGUI _sp;
+
+        void Awake()
+        {
+            Build();
+            _root.gameObject.SetActive(false);
+        }
+
+        public void Open()
+        {
+            _root.gameObject.SetActive(true);
+            transform.SetAsLastSibling();
+            _sp.text = "보유 SP  <color=#ffcc6b><size=34>0</size></color>";
+        }
+
+        public void Close()
+        {
+            bool was = IsOpen;
+            _root.gameObject.SetActive(false);
+            if (was) Closed?.Invoke();
+        }
+
+        void Update()
+        {
+            if (!IsOpen) return;
+            var kb = Keyboard.current;
+            if (kb != null && kb.escapeKey.wasPressedThisFrame) Close();
+        }
+
+        // ───────────────────────────── 조립 ─────────────────────────────
+
+        void Build()
+        {
+            _root = UiKit.Stretch(UiKit.Rect(transform, "SkillWindow"));
+            var dim = UiKit.Image(_root, "Dim", new Color(0f, 0f, 0f, 0.55f), null, true);
+            UiKit.Stretch(dim.rectTransform);
+
+            const float W = 1260f, H = 800f;
+            var border = UiKit.Image(_root, "Border", ColBorder, UiArt.RoundRectFill, true);
+            border.type = Image.Type.Sliced;
+            UiKit.Place(border.rectTransform, new Vector2(0.5f, 0.5f), Vector2.zero, new Vector2(W + 4f, H + 4f));
+            var panel = UiKit.Image(border.transform, "Panel", ColPanel, UiArt.RoundRectFill);
+            panel.type = Image.Type.Sliced;
+            UiKit.Stretch(panel.rectTransform);
+            panel.rectTransform.offsetMin = new Vector2(2f, 2f);
+            panel.rectTransform.offsetMax = new Vector2(-2f, -2f);
+            var p = panel.rectTransform;
+
+            var title = UiKit.Text(p, "Title", "스킬", 46, TextAlignmentOptions.Left);
+            Corner(title.rectTransform, new Vector2(0f, 1f), new Vector2(44f, -30f), new Vector2(400f, 60f));
+            title.fontStyle = FontStyles.Bold;
+            var sub = UiKit.Text(p, "Subtitle", "배운 스킬은 장착 없이 전부 쓸 수 있습니다  ·  커맨드 = 방향 + L  ·  커맨드로 쓰면 재사용 -10%", 20, TextAlignmentOptions.Left);
+            Corner(sub.rectTransform, new Vector2(0f, 1f), new Vector2(46f, -92f), new Vector2(1000f, 30f));
+            sub.color = ColMuted;
+
+            _sp = UiKit.Text(p, "SP", "", 24, TextAlignmentOptions.Right);
+            Corner(_sp.rectTransform, new Vector2(1f, 1f), new Vector2(-44f, -38f), new Vector2(360f, 44f));
+
+            var line = UiKit.Image(p, "Line", new Color(1f, 1f, 1f, 0.12f));
+            line.rectTransform.anchorMin = new Vector2(0f, 1f); line.rectTransform.anchorMax = new Vector2(1f, 1f);
+            line.rectTransform.pivot = new Vector2(0.5f, 1f);
+            line.rectTransform.offsetMin = new Vector2(40f, -136f); line.rectTransform.offsetMax = new Vector2(-40f, -134f);
+
+            // 4 × 3 카드
+            const float cw = 280f, ch = 150f, gap = 20f;
+            float x0 = (W - (4 * cw + 3 * gap)) * 0.5f;
+            for (int i = 0; i < Skills.Length; i++)
+            {
+                int col = i % 4, row = i / 4;
+                Card(p, Skills[i], new Vector2(x0 + col * (cw + gap), -160f - row * (ch + gap)), new Vector2(cw, ch));
+            }
+
+            var note = UiKit.Text(p, "Note", "SP 강화 · 단축키 등록은 준비 중입니다", 20, TextAlignmentOptions.Left);
+            Corner(note.rectTransform, new Vector2(0f, 0f), new Vector2(46f, 40f), new Vector2(700f, 40f));
+            note.color = ColMuted;
+
+            var close = OutlineButton(p, "닫기 (Esc)", new Vector2(-40f, 30f), new Vector2(200f, 60f));
+            close.onClick.AddListener(Close);
+        }
+
+        void Card(RectTransform parent, Skill s, Vector2 pos, Vector2 size)
+        {
+            bool learned = s.Starter;
+
+            var bg = UiKit.Image(parent, "Card_" + s.Name, ColCard, UiArt.RoundRectFill);
+            bg.type = Image.Type.Sliced;
+            Corner(bg.rectTransform, new Vector2(0f, 1f), pos, size);
+            var ol = UiKit.Image(bg.transform, "Outline", learned ? new Color(0.86f, 0.64f, 0.30f, 0.9f) : new Color(0.40f, 0.38f, 0.48f, 0.8f), UiArt.RoundRectOutline);
+            ol.type = Image.Type.Sliced;
+            UiKit.Stretch(ol.rectTransform);
+
+            // 아이콘 — 스킬트리 노드와 같은 금속 링
+            const float ring = 104f, inner = 90f;
+            var r = UiKit.Image(bg.transform, "Ring", learned ? ColGold : ColSteel, UiArt.MetalDisc);
+            Corner(r.rectTransform, new Vector2(0f, 0.5f), new Vector2(20f, 0f), new Vector2(ring, ring));
+            r.rectTransform.pivot = new Vector2(0f, 0.5f);
+            var inn = UiKit.Image(r.transform, "Inner", new Color(0.08f, 0.06f, 0.12f, 1f), UiArt.Disc);
+            UiKit.Place(inn.rectTransform, new Vector2(0.5f, 0.5f), Vector2.zero, new Vector2(inner, inner));
+            inn.gameObject.AddComponent<Mask>().showMaskGraphic = true;
+            var art = UiKit.Image(inn.transform, "Art", learned ? Color.white : new Color(0.55f, 0.55f, 0.62f, 1f), Resources.Load<Sprite>("Icons/" + s.Icon));
+            UiKit.Place(art.rectTransform, new Vector2(0.5f, 0.5f), Vector2.zero, new Vector2(inner * 0.94f, inner * 0.94f));
+            if (art.sprite == null) art.color = Color.clear;
+            if (!learned)
+            {
+                var lk = UiKit.Image(r.transform, "Lock", new Color(0.20f, 0.19f, 0.25f, 1f), UiArt.Disc);
+                UiKit.Place(lk.rectTransform, new Vector2(0.5f, 0f), new Vector2(0f, 6f), new Vector2(30f, 30f));
+                var li = UiKit.Image(lk.transform, "Icon", new Color(0.85f, 0.83f, 0.92f, 1f), UiArt.Lock);
+                UiKit.Place(li.rectTransform, new Vector2(0.5f, 0.5f), Vector2.zero, new Vector2(18f, 18f));
+            }
+
+            float tx = 140f;
+            var nm = UiKit.Text(bg.transform, "Name", s.Name, 25, TextAlignmentOptions.Left);
+            Corner(nm.rectTransform, new Vector2(0f, 1f), new Vector2(tx, -18f), new Vector2(size.x - tx - 10f, 34f));
+            nm.fontStyle = FontStyles.Bold;
+            nm.enableAutoSizing = true; nm.fontSizeMax = 25f; nm.fontSizeMin = 18f;
+            if (!learned) nm.color = new Color(0.80f, 0.78f, 0.86f, 1f);
+
+            var cmd = UiKit.Text(bg.transform, "Cmd", s.Cmd, 22, TextAlignmentOptions.Left);
+            Corner(cmd.rectTransform, new Vector2(0f, 1f), new Vector2(tx, -54f), new Vector2(size.x - tx - 10f, 30f));
+            cmd.color = learned ? ColGold : new Color(0.72f, 0.62f, 0.45f, 1f);
+
+            var role = UiKit.Text(bg.transform, "Role", s.Role, 17, TextAlignmentOptions.Left);
+            Corner(role.rectTransform, new Vector2(0f, 1f), new Vector2(tx, -86f), new Vector2(size.x - tx - 10f, 24f));
+            role.color = ColMuted;
+
+            string state = learned
+                ? "<color=#9be37a>배움 · Lv 1</color>"
+                : $"<color=#8f8aa3>잠김 · </color>{UiKit.Icon(s.Cost)}<color=#c9c4d6> {s.Amount}</color>";
+            if (s.Ultimate) state += "  <color=#ff9a6b>★</color>";
+            var st = UiKit.Text(bg.transform, "State", state, 18, TextAlignmentOptions.Left);
+            Corner(st.rectTransform, new Vector2(0f, 1f), new Vector2(tx, -114f), new Vector2(size.x - tx - 10f, 26f));
+        }
+
+        Button OutlineButton(RectTransform parent, string label, Vector2 pos, Vector2 size)
+        {
+            var fill = UiKit.Image(parent, "Close", new Color(0.10f, 0.08f, 0.15f, 0.85f), UiArt.RoundRectFill, true);
+            fill.type = Image.Type.Sliced;
+            Corner(fill.rectTransform, new Vector2(1f, 0f), pos, size);
+            var outline = UiKit.Image(fill.transform, "Outline", new Color(0.55f, 0.50f, 0.66f, 0.9f), UiArt.RoundRectOutline);
+            outline.type = Image.Type.Sliced;
+            UiKit.Stretch(outline.rectTransform);
+            var b = fill.gameObject.AddComponent<Button>();
+            var c = b.colors; c.highlightedColor = new Color(1.3f, 1.3f, 1.3f); b.colors = c;
+            var t = UiKit.Text(fill.transform, "Label", label, 22);
+            UiKit.Stretch(t.rectTransform);
+            t.color = new Color(0.92f, 0.90f, 0.96f, 1f);
+            return b;
+        }
+
+        static void Corner(RectTransform rt, Vector2 anchor, Vector2 pos, Vector2 size)
+        {
+            rt.anchorMin = rt.anchorMax = anchor;
+            rt.pivot = anchor;
+            rt.anchoredPosition = pos;
+            rt.sizeDelta = size;
+        }
+    }
+}

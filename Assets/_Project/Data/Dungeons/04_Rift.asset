@@ -1,0 +1,30 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 068d75f050c86964d8d6e4ab8a7fc380, type: 3}
+  m_Name: 04_Rift
+  m_EditorClassIdentifier: Assembly-CSharp::Proto.Data.DungeonDef
+  id: rift
+  displayName: "\uB9C8\uACC4 \uADE0\uC5F4"
+  subtitle: "\uB4A4\uD2C0\uB9B0 \uB545 \xB7 \uB9C8\uBB3C"
+  description: "\uD558\uB298\uC774 \uAC08\uB77C\uC9C4 \uC790\uB9AC. \uB9C8\uAE30\uC5D0
+    \uBB3C\uB4E0 \uC9D0\uC2B9\uC774 \uB4E4\uB053\uACE0, \uADE0\uC5F4\uC758 \uAD70\uC8FC\uAC00
+    \uADF8 \uB108\uBA38\uB97C \uC9C0\uD0A8\uB2E4."
+  theme: {fileID: 11400000, guid: f92f4b88744338741ba58d4527034836, type: 2}
+  cardArt: {fileID: 2800000, guid: 20ccaa1abd76db14ca931aa6147f5ddf, type: 3}
+  portalColor: {r: 0.62, g: 0.1, b: 0.95, a: 1}
+  portalAccent: {r: 1, g: 0.45, b: 0.8, a: 1}
+  danger: 4
+  enemyHealthMul: 4.8
+  enemyDamageMul: 2.6
+  bossHealthMul: 5
+  bossDamageMul: 2.6
+  rewardMul: 3.5

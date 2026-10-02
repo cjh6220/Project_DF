@@ -1,0 +1,442 @@
+using System;
+using System.Collections;
+using System.Collections.Generic;
+using UnityEngine;
+using UnityEngine.UI;
+using TMPro;
+using Proto.Core;
+using Proto.Data;
+using Proto.Town;
+
+namespace Proto.UI
+{
+    /// <summary>
+    /// 던전 선택 창 — 마을 도리이에 들어서면 화면 아래에서 카드 네 장이 올라온다.
+    ///
+    ///   화면 위쪽은 비워 둔다. 카드를 옮길 때마다 뒤의 포털이 그 던전 색으로 바뀌는 게 보여야 한다.
+    ///   카드   번호 · 이름 · 한 줄 설명 · 위험도 · 상태(입장 가능 / 클리어 / 잠김)
+    ///   조작   ← → 고르기 · 대화 키 입장 · 취소 키 돌아가기 · 마우스는 올리면 고르고 누르면 입장
+    ///
+    /// 상태는 마을(VillageController)과 RunManager가 갖고 있다. 이 화면은 보여 주고 결과만 알린다.
+    /// </summary>
+    public class DungeonSelectView : MonoBehaviour
+    {
+        public bool IsOpen => _root != null && _root.gameObject.activeSelf;
+
+        /// <summary>카드를 옮겼다 — 포털 색 미리보기</summary>
+        public event Action<DungeonDef> Highlighted;
+        public event Action<DungeonDef> Chosen;
+        public event Action Cancelled;
+
+        static readonly Color ColCard = new Color(0.08f, 0.065f, 0.11f, 0.94f);
+        static readonly Color ColEdge = new Color(0.40f, 0.38f, 0.48f, 0.7f);
+        static readonly Color ColGold = new Color(1f, 0.80f, 0.42f, 1f);
+        static readonly Color ColMuted = new Color(0.70f, 0.67f, 0.78f, 1f);
+        static readonly Color ColGreen = new Color(0.62f, 0.92f, 0.50f, 1f);
+        static readonly Color ColLocked = new Color(0.55f, 0.52f, 0.60f, 1f);
+
+        const float CardW = 340f, CardH = 300f, Gap = 26f, Lift = 18f;
+
+        class Card
+        {
+            public RectTransform Root, Body;
+            public Image Bg, Outline, Glow, Band, Swirl, LockImg;
+            public CanvasGroup Group;
+            public TextMeshProUGUI Num, Name, Sub, Status;
+            public Image[] Pips;
+            public float LiftNow;
+            public float Pop;      // 고른 순간 툭 커졌다가 돌아온다
+            public float ShakeT;   // 잠긴 카드를 누르면 좌우로 떤다
+        }
+
+        RectTransform _root, _row;
+        CanvasGroup _rootGroup;
+        TextMeshProUGUI _title, _detName, _detBody, _hint;
+        readonly List<Card> _cards = new();
+
+        VillageController _village;
+        DungeonDef[] _list = Array.Empty<DungeonDef>();
+        int _sel;
+        bool _closing;
+        float _openedAt;
+
+        void Awake()
+        {
+            Build();
+            _root.gameObject.SetActive(false);
+        }
+
+        void OnEnable() => GameInput.SchemeChanged += RefreshHint;
+        void OnDisable() => GameInput.SchemeChanged -= RefreshHint;
+
+        // ───────────────────────────── 열기·닫기 ─────────────────────────────
+
+        public void Open(VillageController village, int start)
+        {
+            _village = village;
+            _list = village.Dungeons ?? Array.Empty<DungeonDef>();
+            EnsureCards(_list.Length);
+
+            _root.gameObject.SetActive(true);
+            transform.SetAsLastSibling();
+            _closing = false;
+            _openedAt = Time.unscaledTime;
+
+            for (int i = 0; i < _cards.Count; i++) Fill(i);
+            _sel = Mathf.Clamp(start, 0, Mathf.Max(0, _list.Length - 1));
+            foreach (var c in _cards) c.LiftNow = 0f;
+            Select(_sel, true);
+            RefreshHint();
+            StopAllCoroutines();
+            StartCoroutine(SlideIn());
+        }
+
+        /// <summary>조용히 닫는다 (마을을 떠날 때).</summary>
+        public void Hide()
+        {
+            StopAllCoroutines();
+            _root.gameObject.SetActive(false);
+        }
+
+        void Cancel()
+        {
+            if (_closing) return;
+            StartCoroutine(SlideOut(() => Cancelled?.Invoke()));
+        }
+
+        void Choose()
+        {
+            if (_closing || _list.Length == 0) return;
+            if (!_village.IsUnlocked(_sel)) { _cards[_sel].ShakeT = 0.3f; return; }
+            var d = _list[_sel];
+            _cards[_sel].Pop = 0.09f;
+            StartCoroutine(SlideOut(() => Chosen?.Invoke(d), 0.12f));
+        }
+
+        // ───────────────────────────── 입력 ─────────────────────────────
+
+        void Update()
+        {
+            if (!IsOpen) return;
+
+            // 카드가 올라오는 사이 눌린 입력은 버린다
+            if (!_closing && Time.unscaledTime - _openedAt > 0.15f)
+            {
+                if (GameInput.CancelPressed) Cancel();
+                else
+                {
+                    var d = GameInput.Navigate();
+                    if (d.x != 0 && _list.Length > 0) Select((_sel + d.x + _list.Length) % _list.Length);
+                    if (GameInput.InteractPressed) Choose();
+                }
+            }
+
+            // 고른 카드는 떠오르고, 뒤의 빛이 숨 쉰다
+            float pulse = 0.45f + 0.15f * Mathf.Sin(Time.unscaledTime * 3.2f);
+            for (int i = 0; i < _cards.Count; i++)
+            {
+                var c = _cards[i];
+                bool on = i == _sel;
+                c.LiftNow = Mathf.Lerp(c.LiftNow, on ? 1f : 0f, 1f - Mathf.Exp(-Time.unscaledDeltaTime * 14f));
+                float dt = Time.unscaledDeltaTime;
+                c.Pop = Mathf.MoveTowards(c.Pop, 0f, dt * 0.5f);
+                c.ShakeT = Mathf.Max(0f, c.ShakeT - dt);
+                float shake = Mathf.Sin(c.ShakeT * 70f) * 9f * (c.ShakeT / 0.3f);
+                c.Body.anchoredPosition = new Vector2(shake, c.LiftNow * Lift);
+                c.Body.localScale = Vector3.one * (1f + 0.035f * c.LiftNow + c.Pop);
+                var g = c.Glow.color; g.a = c.LiftNow * pulse; c.Glow.color = g;
+                if (c.Swirl != null) c.Swirl.rectTransform.localRotation = Quaternion.Euler(0f, 0f, -Time.unscaledTime * (on ? 40f : 12f));
+            }
+        }
+
+        void Select(int i, bool force = false)
+        {
+            if (i == _sel && !force) return;
+            _sel = i;
+            for (int k = 0; k < _cards.Count; k++)
+            {
+                var c = _cards[k];
+                bool on = k == _sel;
+                c.Outline.color = on ? ColGold : ColEdge;
+            }
+            if (_list.Length == 0) return;
+
+            var d = _list[_sel];
+            bool open = _village.IsUnlocked(_sel);
+            _detName.text = open ? d.displayName : d.displayName + "  <size=70%><color=#8C8799>(잠김)</color></size>";
+            _detBody.text = open ? d.description : "앞 던전의 보스를 쓰러뜨리면 열립니다.";
+            _detName.color = Color.Lerp(d.portalAccent, Color.white, 0.55f);
+            Highlighted?.Invoke(d);
+        }
+
+        void RefreshHint()
+        {
+            if (_hint == null) return;
+            InputFx.Set(_hint,
+                $"{InputGlyphs.Of(Act.Navigate)} 선택     {InputGlyphs.Of(Act.Interact)} 입장     {InputGlyphs.Of(Act.Cancel)} 돌아가기");
+        }
+
+        // ───────────────────────────── 조립 ─────────────────────────────
+
+        void Build()
+        {
+            _root = UiKit.Stretch(UiKit.Rect(transform, "DungeonSelect"));
+            _rootGroup = _root.gameObject.AddComponent<CanvasGroup>();
+
+            // 아래에서 위로 옅어지는 어둠 — 위쪽 포털은 그대로 보이게
+            var shade = UiKit.Image(_root, "Shade", new Color(0.02f, 0.01f, 0.04f, 0.94f), VerticalFade(), true);
+            shade.rectTransform.anchorMin = new Vector2(0f, 0f);
+            shade.rectTransform.anchorMax = new Vector2(1f, 0f);
+            shade.rectTransform.pivot = new Vector2(0.5f, 0f);
+            shade.rectTransform.anchoredPosition = Vector2.zero;
+            shade.rectTransform.sizeDelta = new Vector2(0f, 760f);
+
+            // 설명 글 뒤의 띠 — 뒤로 비치는 마을 담장 위에서도 읽히게
+            var band = UiKit.Image(_root, "DetailBand", new Color(0.02f, 0.01f, 0.05f, 0.72f), HorizontalFade());
+            Bottom(band.rectTransform, new Vector2(0f, 540f), new Vector2(1500f, 108f));
+
+            _title = UiKit.Text(_root, "Title", "던전 선택", 40, TextAlignmentOptions.Left);
+            Bottom(_title.rectTransform, new Vector2(-560f, 620f), new Vector2(400f, 56f));
+            _title.fontStyle = FontStyles.Bold;
+            _title.color = ColGold;
+
+            _detName = UiKit.Text(_root, "DetailName", "", 34, TextAlignmentOptions.Center);
+            Bottom(_detName.rectTransform, new Vector2(0f, 560f), new Vector2(1200f, 50f));
+            _detName.fontStyle = FontStyles.Bold;
+            _detName.richText = true;
+
+            _detBody = UiKit.Text(_root, "DetailBody", "", 22, TextAlignmentOptions.Center);
+            Bottom(_detBody.rectTransform, new Vector2(0f, 518f), new Vector2(1300f, 34f));
+            _detBody.color = ColMuted;
+
+            _row = UiKit.Rect(_root, "Cards");
+            Bottom(_row, new Vector2(0f, 110f), new Vector2(4 * CardW + 3 * Gap, CardH + Lift));
+            _row.pivot = new Vector2(0.5f, 0f);
+
+            _hint = UiKit.Text(_root, "Hint", "", 22, TextAlignmentOptions.Center);
+            Bottom(_hint.rectTransform, new Vector2(0f, 46f), new Vector2(1200f, 34f));
+            _hint.color = ColMuted;
+        }
+
+        void EnsureCards(int n)
+        {
+            while (_cards.Count < n) _cards.Add(MakeCard(_cards.Count));
+            for (int i = 0; i < _cards.Count; i++) _cards[i].Root.gameObject.SetActive(i < n);
+            float total = n * CardW + Mathf.Max(0, n - 1) * Gap;
+            _row.sizeDelta = new Vector2(total, CardH + Lift);
+            for (int i = 0; i < n; i++)
+                _cards[i].Root.anchoredPosition = new Vector2(i * (CardW + Gap) + CardW * 0.5f, 0f);
+        }
+
+        Card MakeCard(int index)
+        {
+            var c = new Card();
+            c.Root = UiKit.Rect(_row, "Card" + index);
+            c.Root.anchorMin = c.Root.anchorMax = new Vector2(0f, 0f);
+            c.Root.pivot = new Vector2(0.5f, 0f);
+            c.Root.sizeDelta = new Vector2(CardW, CardH);
+            c.Group = c.Root.gameObject.AddComponent<CanvasGroup>();
+
+            c.Body = UiKit.Rect(c.Root, "Body");
+            UiKit.Stretch(c.Body);
+
+            c.Glow = UiKit.Image(c.Body, "Glow", new Color(1f, 1f, 1f, 0f), UiKit.Soft);
+            UiKit.Place(c.Glow.rectTransform, new Vector2(0.5f, 0.5f), Vector2.zero, new Vector2(CardW + 90f, CardH + 90f));
+
+            c.Bg = UiKit.Image(c.Body, "Bg", ColCard, UiArt.RoundRectFill, true);
+            c.Bg.type = Image.Type.Sliced;
+            UiKit.Stretch(c.Bg.rectTransform);
+
+            // 위쪽 그림 칸 — 던전 색의 소용돌이
+            var band = UiKit.Rect(c.Body, "Band");
+            band.anchorMin = new Vector2(0f, 1f); band.anchorMax = new Vector2(1f, 1f);
+            band.pivot = new Vector2(0.5f, 1f);
+            band.offsetMin = new Vector2(10f, -140f); band.offsetMax = new Vector2(-10f, -10f);
+            band.gameObject.AddComponent<RectMask2D>();
+            c.Band = UiKit.Image(band, "BandFill", Color.white, UiArt.RoundRectFill);
+            c.Band.type = Image.Type.Sliced;
+            UiKit.Stretch(c.Band.rectTransform);
+            c.Swirl = UiKit.Image(band, "Swirl", Color.white, SwirlSprite());
+            UiKit.Place(c.Swirl.rectTransform, new Vector2(0.5f, 0.5f), Vector2.zero, new Vector2(300f, 300f));
+
+            c.Num = UiKit.Text(band, "Num", "", 54, TextAlignmentOptions.TopLeft);
+            Corner(c.Num.rectTransform, new Vector2(0f, 1f), new Vector2(14f, -6f), new Vector2(120f, 70f));
+            c.Num.fontStyle = FontStyles.Bold;
+            c.Num.color = new Color(1f, 1f, 1f, 0.9f);
+
+            c.LockImg = UiKit.Image(band, "Lock", new Color(1f, 1f, 1f, 0.85f), UiArt.Lock);
+            UiKit.Place(c.LockImg.rectTransform, new Vector2(0.5f, 0.5f), Vector2.zero, new Vector2(54f, 54f));
+            c.LockImg.preserveAspect = true;
+
+            c.Name = UiKit.Text(c.Body, "Name", "", 30, TextAlignmentOptions.Left);
+            Corner(c.Name.rectTransform, new Vector2(0f, 1f), new Vector2(22f, -152f), new Vector2(CardW - 44f, 40f));
+            c.Name.fontStyle = FontStyles.Bold;
+
+            c.Sub = UiKit.Text(c.Body, "Sub", "", 19, TextAlignmentOptions.Left);
+            Corner(c.Sub.rectTransform, new Vector2(0f, 1f), new Vector2(22f, -194f), new Vector2(CardW - 44f, 28f));
+            c.Sub.color = ColMuted;
+
+            var dl = UiKit.Text(c.Body, "DangerLabel", "위험도", 17, TextAlignmentOptions.Left);
+            Corner(dl.rectTransform, new Vector2(0f, 1f), new Vector2(22f, -232f), new Vector2(80f, 24f));
+            dl.color = ColMuted;
+            c.Pips = new Image[4];
+            for (int k = 0; k < 4; k++)
+            {
+                var pip = UiKit.Image(c.Body, "Pip" + k, Color.white);
+                Corner(pip.rectTransform, new Vector2(0f, 1f), new Vector2(96f + k * 24f, -236f), new Vector2(13f, 13f));
+                pip.rectTransform.pivot = new Vector2(0.5f, 0.5f);
+                pip.rectTransform.anchoredPosition += new Vector2(6f, -8f);
+                pip.rectTransform.localRotation = Quaternion.Euler(0f, 0f, 45f);
+                c.Pips[k] = pip;
+            }
+
+            c.Status = UiKit.Text(c.Body, "Status", "", 19, TextAlignmentOptions.Right);
+            Corner(c.Status.rectTransform, new Vector2(1f, 0f), new Vector2(-20f, 14f), new Vector2(CardW - 40f, 28f));
+            c.Status.fontStyle = FontStyles.Bold;
+
+            c.Outline = UiKit.Image(c.Body, "Outline", ColEdge, UiArt.RoundRectOutline);
+            c.Outline.type = Image.Type.Sliced;
+            UiKit.Stretch(c.Outline.rectTransform);
+
+            // 마우스 — 올리면 고르고, 누르면 들어간다
+            var h = c.Bg.gameObject.AddComponent<SkillCardHandle>();
+            int idx = index;
+            h.Enter = () => { if (!_closing) Select(idx); };
+            h.Click = () => { if (_closing) return; if (_sel != idx) Select(idx); else Choose(); };
+            return c;
+        }
+
+        void Fill(int i)
+        {
+            var c = _cards[i];
+            if (i >= _list.Length || _list[i] == null) return;
+            var d = _list[i];
+            bool open = _village.IsUnlocked(i);
+            bool cleared = _village.IsCleared(i);
+
+            c.Num.text = (i + 1).ToString("00");
+            c.Name.text = d.displayName;
+            c.Sub.text = d.subtitle;
+            c.Band.color = open ? d.portalColor * 0.32f + new Color(0f, 0f, 0f, 1f) : new Color(0.12f, 0.11f, 0.14f, 1f);
+            var sw = Color.Lerp(d.portalColor, d.portalAccent, 0.35f); sw.a = open ? 0.95f : 0.18f;
+            c.Swirl.color = sw;
+            c.LockImg.gameObject.SetActive(!open);
+            c.Name.color = open ? Color.white : ColLocked;
+            var glow = Color.Lerp(d.portalColor, d.portalAccent, 0.3f); glow.a = 0f;
+            c.Glow.color = glow;
+            for (int k = 0; k < 4; k++)
+                c.Pips[k].color = k < d.danger
+                    ? (open ? Color.Lerp(new Color(1f, 0.75f, 0.35f), new Color(1f, 0.35f, 0.3f), k / 3f) : ColLocked)
+                    : new Color(1f, 1f, 1f, 0.14f);
+
+            if (!open) { c.Status.text = "잠김"; c.Status.color = ColLocked; }
+            else if (cleared) { c.Status.text = "클리어"; c.Status.color = ColGreen; }
+            else { c.Status.text = "입장 가능"; c.Status.color = ColGold; }
+        }
+
+        // ───────────────────────────── 연출 ─────────────────────────────
+
+        IEnumerator SlideIn()
+        {
+            float t = 0f;
+            const float dur = 0.42f, stagger = 0.05f;
+            while (t < dur + stagger * _cards.Count)
+            {
+                t += Time.unscaledDeltaTime;
+                _rootGroup.alpha = Mathf.Clamp01(t / 0.18f);
+                for (int i = 0; i < _cards.Count; i++)
+                {
+                    float k = Mathf.Clamp01((t - i * stagger) / dur);
+                    float e = 1f - Mathf.Pow(1f - k, 3f);
+                    _cards[i].Root.anchoredPosition = new Vector2(_cards[i].Root.anchoredPosition.x, Mathf.Lerp(-260f, 0f, e));
+                    _cards[i].Group.alpha = k;
+                }
+                yield return null;
+            }
+            foreach (var c in _cards) { c.Root.anchoredPosition = new Vector2(c.Root.anchoredPosition.x, 0f); c.Group.alpha = 1f; }
+            _rootGroup.alpha = 1f;
+        }
+
+        IEnumerator SlideOut(Action then, float delay = 0f)
+        {
+            _closing = true;
+            if (delay > 0f) yield return new WaitForSecondsRealtime(delay);
+            float t = 0f;
+            const float dur = 0.22f;
+            while (t < dur)
+            {
+                t += Time.unscaledDeltaTime;
+                float k = Mathf.Clamp01(t / dur);
+                _rootGroup.alpha = 1f - k;
+                foreach (var c in _cards) c.Root.anchoredPosition = new Vector2(c.Root.anchoredPosition.x, -120f * k * k);
+                yield return null;
+            }
+            _root.gameObject.SetActive(false);
+            _closing = false;
+            then?.Invoke();
+        }
+
+        // ───────────────────────────── 그림 ─────────────────────────────
+
+        static void Bottom(RectTransform rt, Vector2 pos, Vector2 size)
+        {
+            rt.anchorMin = rt.anchorMax = new Vector2(0.5f, 0f);
+            rt.pivot = new Vector2(0.5f, 0.5f);
+            rt.anchoredPosition = pos;
+            rt.sizeDelta = size;
+        }
+
+        static void Corner(RectTransform rt, Vector2 anchor, Vector2 pos, Vector2 size)
+        {
+            rt.anchorMin = rt.anchorMax = anchor;
+            rt.pivot = anchor;
+            rt.anchoredPosition = pos;
+            rt.sizeDelta = size;
+        }
+
+        static Sprite _fade, _swirl, _hfade;
+
+        /// <summary>가운데가 진하고 양옆으로 사라지는 가로 띠.</summary>
+        static Sprite HorizontalFade()
+        {
+            if (_hfade != null) return _hfade;
+            const int N = 128;
+            var tex = new Texture2D(N, 1, TextureFormat.RGBA32, false) { wrapMode = TextureWrapMode.Clamp };
+            for (int x = 0; x < N; x++)
+            {
+                float k = 1f - Mathf.Abs(x / (N - 1f) * 2f - 1f);
+                k = Mathf.Clamp01(k * 2.2f);
+                tex.SetPixel(x, 0, new Color(1f, 1f, 1f, k * k * (3f - 2f * k)));
+            }
+            tex.Apply();
+            _hfade = Sprite.Create(tex, new Rect(0, 0, N, 1), new Vector2(0.5f, 0.5f), 100f);
+            return _hfade;
+        }
+
+        /// <summary>아래가 진하고 위로 갈수록 사라지는 세로 그라데이션.</summary>
+        static Sprite VerticalFade()
+        {
+            if (_fade != null) return _fade;
+            const int N = 64;
+            var tex = new Texture2D(1, N, TextureFormat.RGBA32, false) { wrapMode = TextureWrapMode.Clamp };
+            for (int y = 0; y < N; y++)
+            {
+                float k = 1f - y / (N - 1f);
+                tex.SetPixel(0, y, new Color(1f, 1f, 1f, k * k * (3f - 2f * k)));
+            }
+            tex.Apply();
+            _fade = Sprite.Create(tex, new Rect(0, 0, 1, N), new Vector2(0.5f, 0.5f), 100f);
+            return _fade;
+        }
+
+        /// <summary>카드 그림 칸의 소용돌이. 포털 텍스처가 있으면 그걸 쓴다.</summary>
+        static Sprite SwirlSprite()
+        {
+            if (_swirl != null) return _swirl;
+            var tex = Resources.Load<Texture2D>("PortalSwirlUI");
+            if (tex == null) return UiKit.Soft;
+            _swirl = Sprite.Create(tex, new Rect(0, 0, tex.width, tex.height), new Vector2(0.5f, 0.5f), 100f);
+            return _swirl;
+        }
+    }
+}

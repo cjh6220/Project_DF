@@ -1,0 +1,30 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 068d75f050c86964d8d6e4ab8a7fc380, type: 3}
+  m_Name: 02_Mine
+  m_EditorClassIdentifier: Assembly-CSharp::Proto.Data.DungeonDef
+  id: mine
+  displayName: "\uD3D0\uAD11"
+  subtitle: "\uBC84\uB824\uC9C4 \uAC31\uB3C4 \xB7 \uB3C5\uCDA9"
+  description: "\uAD11\uBD80\uB4E4\uC774 \uB5A0\uB09C \uAC31\uB3C4. \uC6D0\uC11D\uC774
+    \uB9CE\uC774 \uB0A8\uC544 \uC788\uC9C0\uB9CC \uB3C5\uCDA9\uACFC \uCCA0\uAC11
+    \uCF54\uBFD4\uC18C\uAC00 \uC790\uB9AC\uB97C \uCC28\uC9C0\uD588\uB2E4."
+  theme: {fileID: 11400000, guid: ddc9446723a93474791a6e824cd26b9d, type: 2}
+  cardArt: {fileID: 2800000, guid: dfc237a3fe7b46143837d50274ff7dba, type: 3}
+  portalColor: {r: 0.95, g: 0.48, b: 0.1, a: 1}
+  portalAccent: {r: 1, g: 0.82, b: 0.45, a: 1}
+  danger: 2
+  enemyHealthMul: 1.8
+  enemyDamageMul: 1.4
+  bossHealthMul: 1.8
+  bossDamageMul: 1.4
+  rewardMul: 1.6

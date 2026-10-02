@@ -1,0 +1,125 @@
+using UnityEngine;
+using Proto.Core;
+
+namespace Proto.Player
+{
+    /// <summary>
+    /// PlayerController가 내는 신호를 애니메이터로 옮긴다.
+    ///
+    /// 게임 로직과 겉모습을 분리해 둔다. 애니메이션이 없어도 게임은 그대로 돌아가야 하고,
+    /// 캐릭터 모델을 바꿔도 PlayerController는 손대지 않아야 한다.
+    ///
+    /// 벨트스크롤이라 좌우 방향은 회전으로 처리한다.
+    /// 스케일을 음수로 뒤집으면 3D 모델은 노멀이 뒤집혀 조명이 깨진다.
+    /// </summary>
+    [RequireComponent(typeof(PlayerController))]
+    public class PlayerAnimator : MonoBehaviour
+    {
+        [SerializeField] Animator animator;
+        [SerializeField] Transform model;
+
+        [Tooltip("모델이 +Z를 보고 있을 때 오른쪽을 보게 하는 Y 회전값")]
+        [SerializeField] float faceRightYaw = 90f;
+
+        [Tooltip("방향 전환 속도. 즉시 돌면 뚝뚝 끊겨 보인다.")]
+        [SerializeField] float turnSpeed = 18f;
+
+        static readonly int Speed = Animator.StringToHash("Speed");
+        static readonly int Mining = Animator.StringToHash("Mining");
+        static readonly int Dead = Animator.StringToHash("Dead");
+
+        PlayerController _player;
+        CharacterController _cc;
+        Health _health;
+
+        void Awake()
+        {
+            _player = GetComponent<PlayerController>();
+            _cc = GetComponent<CharacterController>();
+            _health = GetComponent<Health>();
+
+            if (animator == null) animator = GetComponentInChildren<Animator>();
+            if (model == null && animator != null) model = animator.transform;
+
+            _player.Attacked += OnAttacked;
+            _player.ComboEnded += OnComboEnded;
+            _player.MineProgressChanged += OnMineProgress;
+            if (_health != null)
+            {
+                _health.Died += OnDied;
+                _health.Changed += OnHealthChanged;
+            }
+        }
+
+        void OnDestroy()
+        {
+            if (_player == null) return;
+            _player.Attacked -= OnAttacked;
+            _player.ComboEnded -= OnComboEnded;
+            _player.MineProgressChanged -= OnMineProgress;
+            if (_health != null)
+            {
+                _health.Died -= OnDied;
+                _health.Changed -= OnHealthChanged;
+            }
+        }
+
+        void Update()
+        {
+            if (animator == null) return;
+
+            // 수평 속도만 본다. 중력으로 인한 y 성분은 달리기로 치면 안 된다.
+            var v = _cc != null ? _cc.velocity : Vector3.zero;
+            v.y = 0f;
+            animator.SetFloat(Speed, v.magnitude);
+
+            if (model == null) return;
+            float yaw = _player.FacingRight ? faceRightYaw : faceRightYaw + 180f;
+            model.localRotation = Quaternion.Slerp(
+                model.localRotation, Quaternion.Euler(0f, yaw, 0f), turnSpeed * Time.deltaTime);
+        }
+
+        /// <summary>
+        /// 콤보 n타 — 해당 상태로 바로 섞어 넘어간다. 트리거·전이 대신 코드로 넘기는 이유는
+        /// 판정 타이밍을 PlayerController가 쥐고 있어서다. 두 곳에서 따로 세면 어긋난다.
+        /// </summary>
+        void OnAttacked()
+        {
+            if (animator == null) return;
+            animator.CrossFadeInFixedTime("Combo" + _player.ComboStepIndex, 0.06f, 0, 0f);
+        }
+
+        void OnComboEnded()
+        {
+            if (animator == null) return;
+            animator.CrossFadeInFixedTime("Idle", 0.2f);
+        }
+
+        void OnMineProgress(float p)
+        {
+            if (animator != null) animator.SetBool(Mining, p >= 0f);
+        }
+
+        bool _down;
+
+        /// <summary>
+        /// 쓰러진 뒤 재시작하면 체력이 다시 채워진다. 그때 Death 상태에서 빠져나올 길이
+        /// 애니메이터에 없으므로 통째로 초기화해서 Idle로 세운다.
+        /// </summary>
+        void OnHealthChanged(float cur, float max)
+        {
+            if (!_down || cur <= 0f || animator == null) return;
+            _down = false;
+            animator.Rebind();
+            animator.Update(0f);
+        }
+
+        void OnDied()
+        {
+            _down = true;
+            if (animator == null) return;
+            animator.SetBool(Mining, false);
+            animator.SetTrigger(Dead);
+        }
+    }
+}

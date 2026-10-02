@@ -179,8 +179,10 @@ namespace Proto.Feel
                 // 이미 번쩍이는 중이면 '흰색'을 원래 색으로 착각하지 않게 처음 값을 유지한다
                 if (!_flashOriginal.ContainsKey(r))
                 {
-                    Color c = block.GetColor("_BaseColor");
-                    _flashOriginal[r] = c == default ? Color.white : c;
+                    // 블록이 비어 있었으면 '원래 색'이 없다 — 머티리얼 색을 그대로 써야 한다.
+                    // 흰색을 넣어 되돌리면 색을 머티리얼마다 따로 칠한 모델(사무라이 등)이 하얗게 남는다.
+                    // 그래서 빈 블록이었다는 표시(alpha < 0)를 남기고, 되돌릴 때 블록을 통째로 지운다.
+                    _flashOriginal[r] = block.isEmpty ? new Color(0f, 0f, 0f, -1f) : block.GetColor("_BaseColor");
                 }
                 block.SetColor("_BaseColor", Color.white * 4f);
                 r.SetPropertyBlock(block);
@@ -191,9 +193,13 @@ namespace Proto.Feel
             foreach (var r in rs)
             {
                 if (r == null || !_flashOriginal.TryGetValue(r, out var orig)) continue;
-                r.GetPropertyBlock(block);
-                block.SetColor("_BaseColor", orig);
-                r.SetPropertyBlock(block);
+                if (orig.a < 0f) r.SetPropertyBlock(null);
+                else
+                {
+                    r.GetPropertyBlock(block);
+                    block.SetColor("_BaseColor", orig);
+                    r.SetPropertyBlock(block);
+                }
                 _flashOriginal.Remove(r);
             }
         }

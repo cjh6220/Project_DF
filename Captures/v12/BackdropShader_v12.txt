@@ -1,0 +1,60 @@
+// 원경 배경판 — 카메라 뒤편 맨 처음에 그리는 그림 한 장.
+// 깊이를 쓰지 않고 맨 먼저 그려서, 땅·나무·건물이 언제나 그 위에 그려진다.
+// 아래쪽은 안개색으로 녹아들고, 전체에 안개를 살짝 덮어 3D 장면과 색을 맞춘다.
+Shader "Proto/Backdrop"
+{
+    Properties
+    {
+        _MainTex   ("Image", 2D) = "black" {}
+        _Tint      ("Tint", Color) = (1, 1, 1, 1)
+        _FadeColor ("Fade Color (= 안개색, 스크립트가 넣는다)", Color) = (0.5, 0.5, 0.5, 1)
+        _Haze      ("Haze (안개를 얼마나 덮나)", Range(0, 1)) = 0.25
+        _FadeBottom ("Bottom Fade (아래에서 이만큼 안개로)", Range(0, 1)) = 0.35
+        _Alpha     ("Alpha", Range(0, 1)) = 1
+    }
+    SubShader
+    {
+        Tags { "Queue" = "Background" "RenderType" = "Background" "RenderPipeline" = "UniversalPipeline" "IgnoreProjector" = "True" "PreviewType" = "Plane" }
+        ZWrite Off
+        ZTest Always
+        Cull Off
+        Blend SrcAlpha OneMinusSrcAlpha
+
+        Pass
+        {
+            Name "Backdrop"
+            Tags { "LightMode" = "UniversalForward" }
+            HLSLPROGRAM
+            #pragma vertex vert
+            #pragma fragment frag
+            #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
+
+            TEXTURE2D(_MainTex); SAMPLER(sampler_MainTex);
+            CBUFFER_START(UnityPerMaterial)
+                float4 _MainTex_ST, _Tint, _FadeColor;
+                float _Haze, _FadeBottom, _Alpha;
+            CBUFFER_END
+
+            struct Attributes { float4 positionOS : POSITION; float2 uv : TEXCOORD0; };
+            struct Varyings   { float4 positionCS : SV_POSITION; float2 uv : TEXCOORD0; };
+
+            Varyings vert(Attributes v)
+            {
+                Varyings o;
+                o.positionCS = TransformObjectToHClip(v.positionOS.xyz);
+                o.uv = TRANSFORM_TEX(v.uv, _MainTex);
+                return o;
+            }
+
+            float4 frag(Varyings i) : SV_Target
+            {
+                float3 c = SAMPLE_TEXTURE2D(_MainTex, sampler_MainTex, i.uv).rgb * _Tint.rgb;
+                c = lerp(c, _FadeColor.rgb, _Haze);
+                float f = saturate(1.0 - i.uv.y / max(_FadeBottom, 1e-3));
+                c = lerp(c, _FadeColor.rgb, f * f * (3.0 - 2.0 * f));
+                return float4(c, _Alpha);
+            }
+            ENDHLSL
+        }
+    }
+}

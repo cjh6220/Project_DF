@@ -1,0 +1,124 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 922b641bc974752439f28276800e7303, type: 3}
+  m_Name: Stage2_Mine
+  m_EditorClassIdentifier: Assembly-CSharp::Proto.Data.StageTheme
+  stageName: "\uD3D0\uAD11"
+  groundMaterial: {fileID: 2100000, guid: d80c88704c2d605469ade81168c2a1e4, type: 2}
+  groundTileSize: 4
+  groundColor: {r: 0.36, g: 0.29, b: 0.22, a: 1}
+  wallColor: {r: 0.08, g: 0.11, b: 0.08, a: 1}
+  skyColor: {r: 0.27, g: 0.2, b: 0.15, a: 1}
+  useFog: 1
+  fogColor: {r: 0.3, g: 0.22, b: 0.16, a: 1}
+  fogStart: 24
+  fogEnd: 44
+  ambientColor: {r: 0.46, g: 0.4, b: 0.36, a: 1}
+  backdrop: {fileID: 2800000, guid: 7d5d346df72cb6944b2dffa7987b4448, type: 3}
+  backdropShift: 0.15
+  backdropHaze: 0.25
+  sunColor: {r: 1, g: 0.8, b: 0.58, a: 1}
+  borderTrees:
+  - {fileID: 5947567890977887509, guid: 980abf2bb03d4814c8a8cad9fd3fa5c2, type: 3}
+  - {fileID: 7658682399492481851, guid: 850cf371227ecdb4c8a21a7e92436546, type: 3}
+  - {fileID: 4335345327989423534, guid: e8d5ba405fa890047bbf6afded7c1441, type: 3}
+  - {fileID: 3419664185192551315, guid: b40ded2a67c914944baff65fd07b2c5d, type: 3}
+  - {fileID: 3709593487142597857, guid: 993e5e0f19ece574b95d47ffad714daf, type: 3}
+  - {fileID: 4309250480460552501, guid: 0972e91d6aa6fcb409e1fc902a432de4, type: 3}
+  - {fileID: 6382446834631474023, guid: fa66f01d7b3b4174c90b16ae8d18b1ae, type: 3}
+  - {fileID: 6104115542328774656, guid: 6c06c79f3145dc24f9eada4ab7f83d0b, type: 3}
+  borderRows: 3
+  borderSpacing: 4.6
+  borderRowGap: 5.5
+  borderScale: {x: 1.1, y: 1.9}
+  exitGapHalfWidth: 3.4
+  sideTrees:
+  - {fileID: 4309250480460552501, guid: 0972e91d6aa6fcb409e1fc902a432de4, type: 3}
+  - {fileID: 1775590769308898832, guid: 8fbd6ad5ebf5cc04787dc03392434700, type: 3}
+  - {fileID: 6382446834631474023, guid: fa66f01d7b3b4174c90b16ae8d18b1ae, type: 3}
+  - {fileID: 2456701532441760096, guid: 523f80a8e8777514f960f6cb18eca1a2, type: 3}
+  - {fileID: 1600809451893531828, guid: 0604ce9b58da7114aa77bfa1ef820aea, type: 3}
+  - {fileID: 8643692802015410307, guid: 95421a40962a96744afebe2e44ad5a06, type: 3}
+  sideTreeScale: {x: 0.9, y: 1.5}
+  sideSpacing: 2.8
+  borderFill:
+  - {fileID: 3687889715272500597, guid: e4bb1a93e0e00b64ab87d67600b73962, type: 3}
+  - {fileID: 1624934613708217177, guid: 135cfa328d7fcb14abf14ee831d9d7d2, type: 3}
+  - {fileID: 6736833054944385561, guid: deb087d15eddeb04294d349af3bd2c72, type: 3}
+  - {fileID: 9102559357623665883, guid: 3b3d53b0638ea0144b2716412e1611ab, type: 3}
+  - {fileID: 8344812684785681657, guid: 94e885b6370879d4b97d92a3a398cf88, type: 3}
+  - {fileID: 8653058259786766523, guid: 59477c4414698cb4c9156907fb4eb8b5, type: 3}
+  - {fileID: 7128514309847616957, guid: 8ed271ede4d98614ca3d515abde2a696, type: 3}
+  borderFillCount: 52
+  borderFillScale: {x: 1.3, y: 2.6}
+  openCameraSide: 1
+  lowBorder:
+  - {fileID: 9051000660223849285, guid: 1b6a25e2b4b751440bcaca922acf586f, type: 3}
+  - {fileID: 2172011278761168382, guid: 68b2ea95dbcf0794e8c3adbd84732e2f, type: 3}
+  - {fileID: 3687889715272500597, guid: e4bb1a93e0e00b64ab87d67600b73962, type: 3}
+  - {fileID: 1702921548647229704, guid: 689fac6d74d3c14489caa0b674eed348, type: 3}
+  - {fileID: 8359377368601381781, guid: 334cf5a393551de42bcbe840720fa6b2, type: 3}
+  - {fileID: 6736833054944385561, guid: deb087d15eddeb04294d349af3bd2c72, type: 3}
+  - {fileID: 7551923686453774446, guid: 3aea1ccf60a7b1644be4d4bfab0de996, type: 3}
+  - {fileID: 4415769217265781465, guid: d5738380b1270be48950dc591816fd6c, type: 3}
+  - {fileID: 417500146505356250, guid: 471afa96244d33d4daad0b46253bb73d, type: 3}
+  - {fileID: 6600279710178241700, guid: 9d6328f70666e594ca046325eab10cca, type: 3}
+  - {fileID: 7032201976474117930, guid: 7191b86395be0104bbefbf6f3353943b, type: 3}
+  - {fileID: 6403411444124743957, guid: 9523f288ee03f6845b728659be7db3e6, type: 3}
+  lowBorderCount: 38
+  lowBorderScale: {x: 0.7, y: 1.2}
+  sideBorderOutset: 4
+  enemyModels:
+  - {fileID: 1356782923155146, guid: 2ef322c53a036124bad12637f603d797, type: 3}
+  - {fileID: 1827545206396254, guid: d1b394efe4dbeb14f8a20e2e04bf1d80, type: 3}
+  - {fileID: 1827545206396254, guid: b18f11080da58d0449ec9da835a6123a, type: 3}
+  - {fileID: 4623556101495578335, guid: 1ef54cdace3ccbe438a80867c3b80014, type: 3}
+  championModels:
+  - {fileID: 1514481875857408, guid: fc3da0b1b2ade5f4b862ae549728831f, type: 3}
+  - {fileID: 1791417161093438, guid: 166de651131410845bbf9789550f6ea0, type: 3}
+  bossModel: {fileID: 6419678248362677416, guid: 8c8a22ddff71f284b87ca2537e62b2ac, type: 3}
+  bossScale: 1.7
+  bossName: "\uCCA0\uAC11 \uCF54\uBFD4\uC18C"
+  bossTitle: "\uD3D0\uAD11\uC758 \uD30C\uC1C4\uC790"
+  obstacles:
+  - {fileID: 4169096484274329770, guid: 3f12c5aeffadbfb48a73664c32368166, type: 3}
+  - {fileID: 4416698844278078833, guid: 4d00dbc1ac9ef304aa979e15efe8d2b6, type: 3}
+  - {fileID: 3667892415101784429, guid: 19fd152f89287704db67a64d6e05aae2, type: 3}
+  - {fileID: 6736833054944385561, guid: deb087d15eddeb04294d349af3bd2c72, type: 3}
+  - {fileID: 9102559357623665883, guid: 3b3d53b0638ea0144b2716412e1611ab, type: 3}
+  - {fileID: 1147093226890383637, guid: d6b052a4fd795c946ae8156f5f78f40c, type: 3}
+  - {fileID: 7837347688433394292, guid: b9133575353e14f4b8bb144ba539ea0a, type: 3}
+  - {fileID: 2440083382892032639, guid: c9e60cf83da7fe44b9f358def467ad7a, type: 3}
+  - {fileID: 8005598143713518864, guid: f9d2f4ff5338a3e4faec8af19ba73f3f, type: 3}
+  obstacleCount: {x: 1, y: 3}
+  obstacleScale: {x: 0.7, y: 1.2}
+  obstacleClearFromEntry: 4.5
+  clutter:
+  - {fileID: 6109376910720859291, guid: 65c8119ca413f1d4387389e844fde9dd, type: 3}
+  - {fileID: 2192684222416585685, guid: 44ffa484624ba6e4384927e2bb2d1e7a, type: 3}
+  - {fileID: 9051000660223849285, guid: 1b6a25e2b4b751440bcaca922acf586f, type: 3}
+  - {fileID: 2172011278761168382, guid: 68b2ea95dbcf0794e8c3adbd84732e2f, type: 3}
+  - {fileID: 1702921548647229704, guid: 689fac6d74d3c14489caa0b674eed348, type: 3}
+  - {fileID: 8359377368601381781, guid: 334cf5a393551de42bcbe840720fa6b2, type: 3}
+  - {fileID: 7032201976474117930, guid: 7191b86395be0104bbefbf6f3353943b, type: 3}
+  - {fileID: 7800149648210378539, guid: 5f1c70eed4873ab4894814f35de56c2f, type: 3}
+  - {fileID: 6403411444124743957, guid: 9523f288ee03f6845b728659be7db3e6, type: 3}
+  - {fileID: 555696721079192986, guid: e5715f6e52abb8149b1f3ddfa3cd8dd3, type: 3}
+  - {fileID: 7551923686453774446, guid: 3aea1ccf60a7b1644be4d4bfab0de996, type: 3}
+  - {fileID: 4415769217265781465, guid: d5738380b1270be48950dc591816fd6c, type: 3}
+  clutterCount: {x: 18, y: 28}
+  clutterScale: {x: 0.6, y: 1}
+  clutterClumps: 5
+  clutterClumpRadius: 1.8
+  clutterStrayRatio: 0.35
+  stripColliders: 1
+  staticBatch: 1
