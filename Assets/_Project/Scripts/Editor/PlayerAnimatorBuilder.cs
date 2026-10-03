@@ -36,7 +36,9 @@ namespace Proto.EditorTools
             // ── 상태 ─────────────────────────────────────────────
             // 무기를 든 자세라 해적 세트가 이 게임에 가장 맞는다.
             var idle = State(sm, "Idle", Clip("In Place/Pirate/Pirate_Idle.anim", "Pirate_Idle"), 1f, new Vector3(260, 0, 0));
+            // 이동 — 속도에 따라 걷기 ↔ 달리기를 섞는다 (방향키 한 번 = 걷기, 두 번 = 달리기)
             var run  = State(sm, "Run",  Clip("In Place/Pirate/Pirate_Run.fbx", "Pirate_Run"), 1f, new Vector3(260, 80, 0));
+            run.motion = Locomotion(ac, Clip("In Place/Pirate/Pirate_Walk.fbx", "Pirate_Walk"), Clip("In Place/Pirate/Pirate_Run.fbx", "Pirate_Run"));
 
             // 기본 공격 3단 콤보 — 카타나 3콤보 (제자리 버전).
             // 상태 사이 전이는 없다. PlayerController가 판정 타이밍을 세고 PlayerAnimator가 코드로 넘긴다.
@@ -196,6 +198,16 @@ namespace Proto.EditorTools
         }
 
         /// <summary>fbx 안의 서브에셋이든 .anim이든 이름으로 찾아온다.</summary>
+        /// <summary>Speed(m/s)로 걷기 ↔ 달리기를 섞는 블렌드 트리. 걷기 3.2m/s, 달리기 6.5m/s에 맞춘다.</summary>
+        public static BlendTree Locomotion(AnimatorController ac, AnimationClip walk, AnimationClip run)
+        {
+            var bt = new BlendTree { name = "Locomotion", blendType = BlendTreeType.Simple1D, blendParameter = "Speed", useAutomaticThresholds = false, hideFlags = HideFlags.HideInHierarchy };
+            AssetDatabase.AddObjectToAsset(bt, ac);
+            bt.AddChild(walk, 3.2f);
+            bt.AddChild(run, 6.5f);
+            return bt;
+        }
+
         static AnimationClip Clip(string relPath, string clipName)
         {
             string path = People + "/" + relPath;

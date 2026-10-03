@@ -1,0 +1,358 @@
+#if UNITY_EDITOR
+using UnityEditor;
+using UnityEditor.Animations;
+using UnityEngine;
+
+namespace Proto.EditorTools
+{
+    /// <summary>
+    /// 사람형 몬스터(좀비·미라·해골)를 몬스터로 쓸 수 있게 만든다. 메뉴: Proto ▸ Build Undead Monsters
+    ///
+    ///   팩 프리팹에는 배회 스크립트 · NavMeshAgent · CharacterController가 붙어 있어서
+    ///   그대로 쓰면 길찾기 경고가 쏟아진다 → 겉모습만 남긴 몬스터용 프리팹을 따로 만든다.
+    ///   애니메이터도 EnemyVisual이 쓰는 이름(Idle · Walk · Run · Attack · Death / isWalking · isRunning · isDead)으로 새로 짠다.
+    ///
+    ///   좀비 · 미라   비틀거리는 좀비 걸음 + 할퀴기
+    ///   해골          보통 걸음 + 찌르기
+    ///
+    /// 만든 뒤 폐광(Stage2_Mine) 테마의 몬스터 목록에 넣는다.
+    /// </summary>
+    public static class MonsterBuilder
+    {
+        const string Pack = "Assets/polyperfect/Low Poly Animated People/";
+        const string Anim = Pack + "- Animations/In Place/";
+        const string OutCtl = "Assets/_Project/Animations/Monsters/";
+        const string OutPrefab = "Assets/_Project/Prefabs/Monsters/";
+
+        [MenuItem("Proto/Build Undead Monsters")]
+        public static void Build()
+        {
+            System.IO.Directory.CreateDirectory(OutCtl);
+            System.IO.Directory.CreateDirectory(OutPrefab);
+
+            var zombie = Controller("Monster_Zombie",
+                Clip("Zombie/Zombie_Idle_1"), Clip("Zombie/Zombie_Walk"), Clip("Zombie/Zombie_Run"),
+                Clip("Zombie/Zombie_Attack"), Clip("Deaths/Death_FallForwards"), 1.0f);
+            var skeleton = Controller("Monster_Skeleton",
+                Clip("Idles/Idle_Generic"), Clip("Locomotion/Walk_Male"), Clip("Locomotion/Run_InPlace"),
+                Clip("Pirate/Pirate_Stab"), Clip("Deaths/Death_Slashed"), 1.15f);
+            // 곡괭이 · 삽처럼 두 손으로 내려치는 무기 — 좀비 걸음 + 대검 내려베기
+            var heavy = Controller("Monster_Heavy",
+                Clip("Zombie/Zombie_Idle_2"), Clip("Zombie/Zombie_Walk"), Clip("Zombie/Zombie_Run"),
+                BigSword("Attack_3Combo_1_Inplace"), Clip("Deaths/Death_FallForwards"), 1.1f);
+
+            var zm = Monster("Zombie_M", "man_zombie", zombie);
+            var zf = Monster("Zombie_F", "woman_zombie", zombie);
+            var mm = Monster("Mummy_M", "man_mummy", zombie);
+            var mf = Monster("Mummy_F", "woman_mummy", zombie);
+            var sk = Monster("Skeleton", "man_skeleton", skeleton, W_Sword, 0.85f);
+
+            // Tripo로 만든 몬스터 (Mixamo 뼈 이름 → 휴머노이드). 키는 미터.
+            var ghoul = TripoMonster("Ghoul", 1.85f, zombie);
+            var zminer = TripoMonster("ZombieMiner", 1.85f, heavy, W_Shovel, 1.15f);
+            var priest = TripoMonster("MummyPriest", 1.9f, skeleton);
+            var knight = TripoMonster("SkeletonKnight", 2.15f, skeleton, W_Sword, 1.15f);   // 엘리트 — 한 뼘 더 크다
+            var uminer = TripoMonster("UndeadMiner", 2.2f, heavy, W_Pickaxe, 1.2f);         // 엘리트 — 덩치
+
+            var king = BuildSkeletonKing();
+
+            var mine = AssetDatabase.LoadAssetAtPath<Proto.Data.StageTheme>("Assets/_Project/Data/Stage2_Mine.asset");
+            if (mine != null)
+            {
+                if (king != null)
+                {
+                    mine.bossModel = king;
+                    mine.bossScale = 1.6f;      // 모델 키 1.85m × 1.6 ≈ 3m
+                    mine.bossName = "해골왕";
+                    mine.bossTitle = "폐광의 주인";
+                }
+                // 해골이 가장 자주 나오게 두 번 넣는다
+                mine.enemyModels = NonNull(sk, sk, zm, zf, mm, mf, ghoul, ghoul, zminer, zminer, priest);
+                mine.championModels = NonNull(knight, uminer);
+                if (mine.championModels.Length == 0) mine.championModels = new[] { sk, mm };
+                EditorUtility.SetDirty(mine);
+            }
+            AssetDatabase.SaveAssets();
+            Debug.Log("[Proto] 언데드 몬스터 준비 완료 — 폐광 몬스터 목록 교체");
+        }
+
+        // ── 무기 (polyperfect 소품) ──
+        const string W_Sword = "Assets/polyperfect/Low Poly Ultimate Pack/M/- Prefabs_M/Medieval_M/sword.prefab";
+        const string W_Pickaxe = "Assets/polyperfect/Low Poly Ultimate Pack/M/- Prefabs_M/Tools_M/pickaxe.prefab";
+        const string W_Shovel = "Assets/polyperfect/Poly Universal Pack/- Prefabs/Halloween/shovel-gravedigger.prefab";
+        const string W_Hammer = "Assets/polyperfect/Poly Universal Pack/- Prefabs/Tools/hammer-big.prefab";
+        const string BigSwordDir = "Assets/Animation/Grruzam Powerful Sword Animation(Great Sword, Katana) 1/Animation/M_Big_Sword/";
+
+        static AnimationClip BigSword(string name)
+        {
+            foreach (var f in System.IO.Directory.GetFiles(BigSwordDir, "M_Big_Sword@" + name + ".FBX", System.IO.SearchOption.AllDirectories))
+                foreach (var o in AssetDatabase.LoadAllAssetsAtPath(f.Replace('\\', '/')))
+                    if (o is AnimationClip c && !c.name.StartsWith("__preview__")) return c;
+            Debug.LogWarning("[Proto] 대검 클립 없음: " + name);
+            return null;
+        }
+
+        /// <summary>
+        /// 오른손에 무기를 쥐여 준다. 무기마다 원점·축이 제각각이라 모양에서 직접 찾는다:
+        ///   가장 긴 축 = 자루 방향, 그 축의 두 끝 중 단면이 가는 쪽 = 손잡이, 두 번째로 긴 축 = 날·머리 방향.
+        /// 기본 자세(T자)에서 무기 끝이 몸 앞쪽, 날·머리가 위를 보게 손바닥에 놓고 손뼈에 붙인다.
+        /// </summary>
+        static void AttachWeapon(GameObject monster, string weaponPath, float length)
+        {
+            if (string.IsNullOrEmpty(weaponPath)) return;
+            var src = AssetDatabase.LoadAssetAtPath<GameObject>(weaponPath);
+            var an = monster.GetComponentInChildren<Animator>();
+            if (src == null || an == null || !an.isHuman) { Debug.LogWarning("[Proto] 무기 못 붙임: " + weaponPath); return; }
+            var hand = an.GetBoneTransform(HumanBodyBones.RightHand);
+            var mid = an.GetBoneTransform(HumanBodyBones.RightMiddleProximal);
+            var fore = an.GetBoneTransform(HumanBodyBones.RightLowerArm);
+            if (hand == null) return;
+
+            var w = (GameObject)Object.Instantiate(src);
+            w.name = "Weapon";
+            foreach (var col in w.GetComponentsInChildren<Collider>(true)) Object.DestroyImmediate(col);
+            foreach (var mb in w.GetComponentsInChildren<MonoBehaviour>(true)) Object.DestroyImmediate(mb);
+            foreach (var r in w.GetComponentsInChildren<Renderer>(true)) r.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.On;
+            w.transform.position = Vector3.zero; w.transform.rotation = Quaternion.identity; w.transform.localScale = Vector3.one;
+
+            // 무기 정점을 무기 원점 기준으로 모은다
+            var pts = new System.Collections.Generic.List<Vector3>();
+            foreach (var mf in w.GetComponentsInChildren<MeshFilter>(true))
+            {
+                if (mf.sharedMesh == null) continue;
+                var m = mf.transform.localToWorldMatrix;
+                foreach (var v in mf.sharedMesh.vertices) pts.Add(m.MultiplyPoint3x4(v));
+            }
+            if (pts.Count == 0) { Object.DestroyImmediate(w); return; }
+            Vector3 mn = pts[0], mx = pts[0];
+            foreach (var p in pts) { mn = Vector3.Min(mn, p); mx = Vector3.Max(mx, p); }
+            var size = mx - mn;
+            int a0 = size.x >= size.y && size.x >= size.z ? 0 : size.y >= size.z ? 1 : 2;
+            int a1 = -1; for (int i = 0; i < 3; i++) if (i != a0 && (a1 < 0 || size[i] > size[a1])) a1 = i;
+            Vector3 L = Vector3.zero; L[a0] = 1f;
+            Vector3 S = Vector3.zero; S[a1] = 1f;
+
+            // 손잡이 쪽 찾기 — 양 끝 15% 구간의 단면 크기 비교
+            float len = size[a0];
+            float spreadLo = 0f, spreadHi = 0f;
+            foreach (var p in pts)
+            {
+                float t = (p[a0] - mn[a0]) / len;
+                float sp = 0f; for (int i = 0; i < 3; i++) if (i != a0) sp = Mathf.Max(sp, Mathf.Abs(p[i] - (mn[i] + mx[i]) * 0.5f));
+                if (t < 0.15f) spreadLo = Mathf.Max(spreadLo, sp);
+                if (t > 0.85f) spreadHi = Mathf.Max(spreadHi, sp);
+            }
+            bool handleAtMin = spreadLo <= spreadHi;
+            if (!handleAtMin) L = -L;                                 // L: 손잡이 → 끝
+            var center = (mn + mx) * 0.5f;
+            var handleEnd = center - L * (len * 0.5f);
+            var gripLocal = handleEnd + L * (len * 0.14f);            // 손잡이 끝에서 조금 안쪽을 쥔다
+
+            float scale = length / Mathf.Max(0.0001f, len);
+            var fwd = monster.transform.forward;
+            var up = monster.transform.up;
+            var rot = Quaternion.LookRotation(fwd, up) * Quaternion.Inverse(Quaternion.LookRotation(L, S));
+            w.transform.rotation = rot;
+            w.transform.localScale = Vector3.one * scale;
+
+            // 손바닥 가운데 — 손목과 가운뎃손가락 뿌리 사이
+            Vector3 palm = mid != null ? Vector3.Lerp(hand.position, mid.position, 0.55f)
+                         : hand.position + (fore != null ? (hand.position - fore.position).normalized * 0.07f : Vector3.zero);
+            var gripWorld = w.transform.TransformPoint(gripLocal);
+            w.transform.position += palm - gripWorld;
+            w.transform.SetParent(hand, true);
+        }
+
+        static GameObject[] NonNull(params GameObject[] xs) => System.Array.FindAll(xs, x => x != null);
+
+        /// <summary>
+        /// Assets/Model/{name}/ 안의 FBX(Tripo, 리깅됨)를 휴머노이드로 바꾸고 키를 맞춰 몬스터 프리팹으로 만든다.
+        /// 키는 가져올 때 크기(Scale Factor)로 맞춘다 — 스폰 쪽 크기를 건드리지 않아도 된다.
+        /// </summary>
+        static GameObject TripoMonster(string name, float height, AnimatorController ctl, string weapon = null, float weaponLength = 1f)
+        {
+            string fbx = null;
+            foreach (var g in AssetDatabase.FindAssets("t:Model", new[] { "Assets/Model/" + name }))
+            { fbx = AssetDatabase.GUIDToAssetPath(g); break; }
+            if (fbx == null) { Debug.LogWarning("[Proto] 모델 없음: Assets/Model/" + name); return null; }
+
+            var imp = (ModelImporter)AssetImporter.GetAtPath(fbx);
+            float h = MeshHeight(fbx) / Mathf.Max(0.0001f, imp.globalScale);    // 크기 1일 때 키
+            imp.animationType = ModelImporterAnimationType.Human;
+            imp.avatarSetup = ModelImporterAvatarSetup.CreateFromThisModel;
+            imp.importAnimation = false;
+            if (h > 0.01f) imp.globalScale = height / h;
+            imp.SaveAndReimport();
+
+            var src = AssetDatabase.LoadAssetAtPath<GameObject>(fbx);
+            var go = (GameObject)PrefabUtility.InstantiatePrefab(src);
+            PrefabUtility.UnpackPrefabInstance(go, PrefabUnpackMode.Completely, InteractionMode.AutomatedAction);
+            go.name = name;
+            var an = go.GetComponent<Animator>();
+            if (an == null) an = go.AddComponent<Animator>();
+            an.runtimeAnimatorController = ctl;
+            an.applyRootMotion = false;
+            an.cullingMode = AnimatorCullingMode.AlwaysAnimate;
+            foreach (var r in go.GetComponentsInChildren<SkinnedMeshRenderer>(true)) r.updateWhenOffscreen = true;
+            AttachWeapon(go, weapon, weaponLength);
+            var saved = PrefabUtility.SaveAsPrefabAsset(go, OutPrefab + name + ".prefab");
+            Object.DestroyImmediate(go);
+            return saved;
+        }
+
+        static float MeshHeight(string fbx)
+        {
+            float h = 0f;
+            foreach (var o in AssetDatabase.LoadAllAssetsAtPath(fbx))
+                if (o is SkinnedMeshRenderer s) h = Mathf.Max(h, s.bounds.size.y);
+            return h;
+        }
+
+        const string KingModel = "Assets/Model/SkeletonKing/SkeletonKing.fbx";
+
+        /// <summary>
+        /// 해골왕 (Tripo 생성 · Mixamo 뼈 이름 → 휴머노이드). 보스가 쓰는 상태:
+        ///   Idle · Walk · Run · Attack(할퀴기) · ChestHit(포효 — 몸을 들썩임) · Death
+        /// 팩의 Wizard 클립은 골반 높이가 0으로 구워져 있어 땅에 박힌다 — 쓰지 않는다.
+        /// </summary>
+        static GameObject BuildSkeletonKing()
+        {
+            var imp = AssetImporter.GetAtPath(KingModel) as ModelImporter;
+            if (imp == null) { Debug.LogWarning("[Proto] 해골왕 모델 없음: " + KingModel); return null; }
+            if (imp.animationType != ModelImporterAnimationType.Human)
+            {
+                imp.animationType = ModelImporterAnimationType.Human;
+                imp.avatarSetup = ModelImporterAvatarSetup.CreateFromThisModel;
+                imp.importAnimation = false;
+                imp.SaveAndReimport();
+            }
+
+            var c = FreshController(OutCtl + "Boss_SkeletonKing.controller");
+            var sm = c.layers[0].stateMachine;
+            AnimatorState S(string n, AnimationClip clip) { var st = sm.AddState(n); st.motion = clip; return st; }
+            var idle = S("Idle", Clip("Idles/Idle_Generic"));
+            S("Walk", Clip("Pirate/Pirate_Walk"));
+            S("Run", Clip("Locomotion/Run_InPlace"));
+            var atk = S("Attack", BigSword("Attack_4Combo_3_Inplace"));   // 큰 망치 내려찍기
+            var roar = S("ChestHit", Clip("Zombie/Zombie_Idle_1"));
+            S("Death", Clip("Deaths/Death_FallForwards"));
+            sm.defaultState = idle;
+            foreach (var st in new[] { atk, roar })
+            {
+                var t = st.AddTransition(idle);
+                t.hasExitTime = true; t.exitTime = 0.95f; t.duration = 0.12f;
+            }
+            EditorUtility.SetDirty(c);
+
+            var src = AssetDatabase.LoadAssetAtPath<GameObject>(KingModel);
+            var go = (GameObject)PrefabUtility.InstantiatePrefab(src);
+            PrefabUtility.UnpackPrefabInstance(go, PrefabUnpackMode.Completely, InteractionMode.AutomatedAction);
+            go.name = "SkeletonKing";
+            var an = go.GetComponent<Animator>();
+            if (an == null) an = go.AddComponent<Animator>();
+            an.runtimeAnimatorController = c;
+            an.applyRootMotion = false;
+            an.cullingMode = AnimatorCullingMode.AlwaysAnimate;
+            foreach (var r in go.GetComponentsInChildren<SkinnedMeshRenderer>(true)) r.updateWhenOffscreen = true;
+            AttachWeapon(go, W_Hammer, 1.45f);
+            var saved = PrefabUtility.SaveAsPrefabAsset(go, OutPrefab + "SkeletonKing.prefab");
+            Object.DestroyImmediate(go);
+            return saved;
+        }
+
+        static AnimationClip Clip(string path)
+        {
+            foreach (var o in AssetDatabase.LoadAllAssetsAtPath(Anim + path + ".fbx"))
+                if (o is AnimationClip c && !c.name.StartsWith("__preview__")) return c;
+            Debug.LogWarning("[Proto] 클립 없음: " + path);
+            return null;
+        }
+
+        static AnimatorController Controller(string name, AnimationClip idle, AnimationClip walk, AnimationClip run,
+                                             AnimationClip attack, AnimationClip death, float attackSpeed)
+        {
+            var c = FreshController(OutCtl + name + ".controller");
+            c.AddParameter("isWalking", AnimatorControllerParameterType.Bool);
+            c.AddParameter("isRunning", AnimatorControllerParameterType.Bool);
+            c.AddParameter("isDead", AnimatorControllerParameterType.Bool);
+            var sm = c.layers[0].stateMachine;
+
+            var sIdle = sm.AddState("Idle"); sIdle.motion = idle;
+            var sWalk = sm.AddState("Walk"); sWalk.motion = walk;
+            var sRun = sm.AddState("Run"); sRun.motion = run;
+            var sAtk = sm.AddState("Attack"); sAtk.motion = attack; sAtk.speed = attackSpeed;
+            var sDeath = sm.AddState("Death"); sDeath.motion = death;
+            sm.defaultState = sIdle;
+
+            Go(sIdle, sWalk, "isWalking", true);
+            Go(sIdle, sRun, "isRunning", true);
+            Go(sWalk, sIdle, "isWalking", false, "isRunning", false);
+            Go(sWalk, sRun, "isRunning", true);
+            Go(sRun, sWalk, "isRunning", false, "isWalking", true);
+            Go(sRun, sIdle, "isRunning", false, "isWalking", false);
+
+            // 공격은 EnemyVisual이 직접 재생한다 — 끝나면 서 있기로
+            var back = sAtk.AddTransition(sIdle);
+            back.hasExitTime = true; back.exitTime = 0.9f; back.duration = 0.1f;
+
+            // 사망도 직접 재생하지만, 파라미터로도 들어갈 수 있게
+            var die = sm.AddAnyStateTransition(sDeath);
+            die.AddCondition(AnimatorConditionMode.If, 0f, "isDead");
+            die.canTransitionToSelf = false; die.duration = 0.08f; die.hasExitTime = false;
+
+            EditorUtility.SetDirty(c);
+            return c;
+        }
+
+        /// <summary>
+        /// 컨트롤러를 비운 채로 돌려준다. 지우고 새로 만들면 GUID가 바뀌어
+        /// 이미 만들어 둔 몬스터 프리팹들의 연결이 끊긴다 — 그래서 같은 에셋을 비워서 다시 채운다.
+        /// </summary>
+        static AnimatorController FreshController(string path)
+        {
+            var c = AssetDatabase.LoadAssetAtPath<AnimatorController>(path);
+            if (c == null) return AnimatorController.CreateAnimatorControllerAtPath(path);
+            foreach (var p in c.parameters) c.RemoveParameter(p);
+            var sm = c.layers[0].stateMachine;
+            foreach (var t in sm.anyStateTransitions) sm.RemoveAnyStateTransition(t);
+            foreach (var st in sm.states) sm.RemoveState(st.state);
+            return c;
+        }
+
+        static void Go(AnimatorState from, AnimatorState to, string p, bool v, string p2 = null, bool v2 = false)
+        {
+            var t = from.AddTransition(to);
+            t.hasExitTime = false; t.duration = 0.15f;
+            t.AddCondition(v ? AnimatorConditionMode.If : AnimatorConditionMode.IfNot, 0f, p);
+            if (p2 != null) t.AddCondition(v2 ? AnimatorConditionMode.If : AnimatorConditionMode.IfNot, 0f, p2);
+        }
+
+        /// <summary>팩 프리팹에서 겉모습만 남겨 몬스터용 프리팹으로 저장한다.</summary>
+        static GameObject Monster(string name, string packPrefab, AnimatorController ctl, string weapon = null, float weaponLength = 1f)
+        {
+            var src = AssetDatabase.LoadAssetAtPath<GameObject>(Pack + "- Prefabs/" + packPrefab + ".prefab");
+            if (src == null) { Debug.LogWarning("[Proto] 프리팹 없음: " + packPrefab); return null; }
+            var go = (GameObject)PrefabUtility.InstantiatePrefab(src);
+            PrefabUtility.UnpackPrefabInstance(go, PrefabUnpackMode.Completely, InteractionMode.AutomatedAction);
+            go.name = name;
+
+            foreach (var mb in go.GetComponentsInChildren<MonoBehaviour>(true)) Object.DestroyImmediate(mb);
+            foreach (var ag in go.GetComponentsInChildren<UnityEngine.AI.NavMeshAgent>(true)) Object.DestroyImmediate(ag);
+            foreach (var cc in go.GetComponentsInChildren<CharacterController>(true)) Object.DestroyImmediate(cc);
+            foreach (var col in go.GetComponentsInChildren<Collider>(true)) Object.DestroyImmediate(col);
+            foreach (var rb in go.GetComponentsInChildren<Rigidbody>(true)) Object.DestroyImmediate(rb);
+
+            var an = go.GetComponentInChildren<Animator>();
+            an.runtimeAnimatorController = ctl;
+            an.applyRootMotion = false;
+            an.cullingMode = AnimatorCullingMode.AlwaysAnimate;
+            AttachWeapon(go, weapon, weaponLength);
+
+            var path = OutPrefab + name + ".prefab";
+            var saved = PrefabUtility.SaveAsPrefabAsset(go, path);
+            Object.DestroyImmediate(go);
+            return saved;
+        }
+    }
+}
+#endif

@@ -1,0 +1,222 @@
+using System;
+using System.Collections.Generic;
+using System.IO;
+using UnityEngine;
+using UnityEngine.InputSystem;
+using UnityEngine.SceneManagement;
+using UnityEngine.UI;
+
+namespace Proto.Core
+{
+    /// <summary>설정 파일 한 장. 세이브(save.json)와 따로 둔다 — 저장 초기화를 해도 설정은 남아야 한다.</summary>
+    [Serializable]
+    public class SettingsData
+    {
+        public int version = 1;
+
+        // 화면
+        public int displayMode = 1;          // 0 전체화면(독점) · 1 테두리 없는 창 · 2 창모드
+        public int width, height;            // 0이면 모니터 해상도
+        public bool vsync = true;
+        public int fpsLimit = 0;             // 0 = 제한 없음
+
+        // 사운드 (0~1)
+        public float master = 0.8f, music = 0.7f, sfx = 0.8f;
+        public bool muteUnfocused = true;
+
+        // 조작
+        public bool vibration = true;
+        public int glyphMode = 0;            // 0 자동 · 1 키보드 · 2 플레이스테이션 · 3 Xbox
+        public List<string> bindActions = new();
+        public List<int> bindIndices = new();
+        public List<string> bindPaths = new();
+
+        // 게임
+        public float shake = 1f;             // 화면 흔들림 0~1
+        public bool reduceFlashes = false;   // 히트스톱 짧게 · 흰 번쩍임 없음
+        public bool damageNumbers = true;
+        public float uiScale = 1f;           // 0.9 ~ 1.3
+        public float commandWindow = 0.35f;  // 커맨드 입력 여유 (초) — 스킬 커맨드 판정이 쓴다
+        public bool autoPause = true;        // 창이 비활성이면 던전 일시정지
+    }
+
+    /// <summary>
+    /// 게임 설정 — 읽기 · 저장 · 적용.
+    /// 저장 위치: Application.persistentDataPath/settings.json. 게임 시작 때 SettingsRuntime이 불러와 적용한다.
+    /// 다른 코드는 GameSettings.Data의 값을 읽기만 하면 된다 (예: Feel이 흔들림 세기를 곱한다).
+    /// </summary>
+    public static class GameSettings
+    {
+        public static SettingsData Data { get; private set; } = new SettingsData();
+        public static event Action Changed;
+
+        static string FilePath => Path.Combine(Application.persistentDataPath, "settings.json");
+
+        public static readonly int[] FpsChoices = { 0, 30, 60, 120, 144, 240 };
+        public static readonly float[] UiScales = { 0.9f, 1f, 1.1f, 1.2f, 1.3f };
+        public static readonly float[] CommandWindows = { 0.25f, 0.35f, 0.5f, 0.7f };
+
+        public static void Load()
+        {
+            try
+            {
+                if (File.Exists(FilePath)) Data = JsonUtility.FromJson<SettingsData>(File.ReadAllText(FilePath)) ?? new SettingsData();
+            }
+            catch (Exception e) { Debug.LogWarning("[Settings] 설정을 읽지 못해 기본값을 씁니다: " + e.Message); Data = new SettingsData(); }
+            ApplyAll();
+        }
+
+        public static void Save()
+        {
+            try
+            {
+                Directory.CreateDirectory(Application.persistentDataPath);
+                File.WriteAllText(FilePath, JsonUtility.ToJson(Data, true));
+            }
+            catch (Exception e) { Debug.LogWarning("[Settings] 저장 실패: " + e.Message); }
+        }
+
+        /// <summary>값을 바꾼 뒤 부른다 — 적용하고 저장하고 알린다.</summary>
+        public static void Commit(bool display = false)
+        {
+            if (display) ApplyDisplay();
+            ApplyAudio(Application.isFocused);
+            ApplyInput();
+            ApplyUiScale();
+            Save();
+            Changed?.Invoke();
+        }
+
+        public static void ResetDefaults()
+        {
+            Data = new SettingsData();
+            GameInput.ClearOverrides();
+            Commit(true);
+        }
+
+        public static void ApplyAll()
+        {
+            ApplyDisplay();
+            ApplyAudio(Application.isFocused);
+            ApplyInput();
+            ApplyUiScale();
+            Changed?.Invoke();
+        }
+
+        // ── 화면 ──
+        public static FullScreenMode Mode => Data.displayMode == 0 ? FullScreenMode.ExclusiveFullScreen
+                                           : Data.displayMode == 2 ? FullScreenMode.Windowed : FullScreenMode.FullScreenWindow;
+
+        public static void ApplyDisplay()
+        {
+            QualitySettings.vSyncCount = Data.vsync ? 1 : 0;
+            Application.targetFrameRate = Data.vsync || Data.fpsLimit <= 0 ? -1 : Data.fpsLimit;
+#if !UNITY_EDITOR
+            int w = Data.width, h = Data.height;
+            if (w <= 0 || h <= 0) { w = Display.main.systemWidth; h = Display.main.systemHeight; }
+            Screen.SetResolution(w, h, Mode);
+#endif
+        }
+
+        /// <summary>고를 수 있는 해상도 (같은 크기는 하나로).</summary>
+        public static List<Vector2Int> Resolutions()
+        {
+            var list = new List<Vector2Int>();
+            foreach (var r in Screen.resolutions)
+            {
+                var v = new Vector2Int(r.width, r.height);
+                if (v.x >= 1024 && !list.Contains(v)) list.Add(v);
+            }
+            if (list.Count == 0) list.Add(new Vector2Int(Screen.width, Screen.height));
+            return list;
+        }
+
+        // ── 사운드 ──
+        public static void ApplyAudio(bool focused)
+        {
+            AudioListener.volume = (!focused && Data.muteUnfocused) ? 0f : Data.master;
+        }
+
+        /// <summary>효과음 최종 배율 (전체 볼륨은 AudioListener가 곱한다).</summary>
+        public static float SfxVolume => Data.sfx;
+        /// <summary>배경음 최종 배율 — 배경음을 넣을 때 이 값을 곱한다.</summary>
+        public static float MusicVolume => Data.music;
+
+        // ── 조작 ──
+        public static void ApplyInput()
+        {
+            GameInput.Ensure();
+            GameInput.ApplyOverrides(Data.bindActions, Data.bindIndices, Data.bindPaths);
+            if (Data.glyphMode == 0) GameInput.UnlockScheme();
+            else GameInput.LockScheme(Data.glyphMode == 2 ? InputScheme.PlayStation : Data.glyphMode == 3 ? InputScheme.Xbox : InputScheme.Keyboard);
+        }
+
+        public static void StoreOverrides()
+        {
+            Data.bindActions.Clear(); Data.bindIndices.Clear(); Data.bindPaths.Clear();
+            GameInput.ExportOverrides(Data.bindActions, Data.bindIndices, Data.bindPaths);
+        }
+
+        // ── UI 크기 ──
+        static readonly Dictionary<CanvasScaler, Vector2> _baseRes = new();
+
+        public static void ApplyUiScale()
+        {
+            float s = Mathf.Clamp(Data.uiScale, 0.8f, 1.5f);
+            foreach (var cs in UnityEngine.Object.FindObjectsByType<CanvasScaler>(FindObjectsInactive.Include, FindObjectsSortMode.None))
+            {
+                if (cs.uiScaleMode != CanvasScaler.ScaleMode.ScaleWithScreenSize) continue;
+                if (!_baseRes.TryGetValue(cs, out var b)) { b = cs.referenceResolution; _baseRes[cs] = b; }
+                cs.referenceResolution = b / s;   // 기준 해상도를 줄이면 UI가 커진다
+            }
+        }
+
+        internal static void ForgetScalers() => _baseRes.Clear();
+    }
+
+    /// <summary>
+    /// 설정을 게임에 붙여 두는 담당 — 씬과 상관없이 하나만 산다 (게임 시작 때 저절로 생긴다).
+    ///   창 포커스: 비활성이면 소리 끄기 · 던전 일시정지
+    ///   씬을 다시 열면(저장 초기화) UI 크기를 다시 적용
+    /// </summary>
+    public class SettingsRuntime : MonoBehaviour
+    {
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
+        static void Boot()
+        {
+            if (FindFirstObjectByType<SettingsRuntime>() != null) return;
+            var go = new GameObject("[Settings]");
+            DontDestroyOnLoad(go);
+            go.AddComponent<SettingsRuntime>();
+            GameSettings.Load();
+        }
+
+        void OnEnable() => SceneManager.sceneLoaded += OnScene;
+        void OnDisable() => SceneManager.sceneLoaded -= OnScene;
+
+        void OnScene(Scene s, LoadSceneMode m)
+        {
+            GameSettings.ForgetScalers();
+            StartCoroutine(ApplyNextFrame());
+        }
+
+        void Start() => StartCoroutine(ApplyNextFrame());
+
+        // 런타임에 만들어지는 캔버스(버튼 표시 알림 등)까지 잡으려고 한 프레임 뒤에 한 번 더
+        System.Collections.IEnumerator ApplyNextFrame()
+        {
+            yield return null;
+            GameSettings.ApplyUiScale();
+        }
+
+        void OnApplicationFocus(bool focus)
+        {
+            GameSettings.ApplyAudio(focus);
+            if (!focus && GameSettings.Data.autoPause)
+            {
+                var menu = FindFirstObjectByType<Proto.UI.GiveUpMenu>();
+                if (menu != null) menu.PauseFromFocusLoss();
+            }
+        }
+    }
+}

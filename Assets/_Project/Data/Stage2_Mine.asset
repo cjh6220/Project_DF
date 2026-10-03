@@ -26,6 +26,7 @@ MonoBehaviour:
   backdrop: {fileID: 2800000, guid: 7d5d346df72cb6944b2dffa7987b4448, type: 3}
   backdropShift: 0.15
   backdropHaze: 0.25
+  backdropDepth: 31
   sunColor: {r: 1, g: 0.8, b: 0.58, a: 1}
   borderTrees:
   - {fileID: 5947567890977887509, guid: 980abf2bb03d4814c8a8cad9fd3fa5c2, type: 3}
@@ -78,17 +79,26 @@ MonoBehaviour:
   lowBorderScale: {x: 0.7, y: 1.2}
   sideBorderOutset: 4
   enemyModels:
-  - {fileID: 1356782923155146, guid: 2ef322c53a036124bad12637f603d797, type: 3}
-  - {fileID: 1827545206396254, guid: d1b394efe4dbeb14f8a20e2e04bf1d80, type: 3}
-  - {fileID: 1827545206396254, guid: b18f11080da58d0449ec9da835a6123a, type: 3}
-  - {fileID: 4623556101495578335, guid: 1ef54cdace3ccbe438a80867c3b80014, type: 3}
+  - {fileID: 8171352321773828056, guid: 7d371e99fa7a29b45a728b59de061aab, type: 3}
+  - {fileID: 8171352321773828056, guid: 7d371e99fa7a29b45a728b59de061aab, type: 3}
+  - {fileID: 4148232280471851379, guid: c827a662b02e91644a5a42ff42182778, type: 3}
+  - {fileID: 2065651984728577559, guid: e00df3fa7413f1746855948212a05a5b, type: 3}
+  - {fileID: 5930579085451160960, guid: aa77c724007bcde49823804dd9f5b262, type: 3}
+  - {fileID: 5112247236109004653, guid: ddd19408d813b9c49b463fef58a14e02, type: 3}
+  - {fileID: 1416051350810494318, guid: d9366b47e287ef2489860165e0fa051d, type: 3}
+  - {fileID: 1416051350810494318, guid: d9366b47e287ef2489860165e0fa051d, type: 3}
+  - {fileID: 8417062223834393225, guid: f720e778d76df194bad1a63d577e9424, type: 3}
+  - {fileID: 8417062223834393225, guid: f720e778d76df194bad1a63d577e9424, type: 3}
+  - {fileID: 497656288647795464, guid: 9bb94c60c879054459a8be71f21def98, type: 3}
   championModels:
-  - {fileID: 1514481875857408, guid: fc3da0b1b2ade5f4b862ae549728831f, type: 3}
-  - {fileID: 1791417161093438, guid: 166de651131410845bbf9789550f6ea0, type: 3}
-  bossModel: {fileID: 6419678248362677416, guid: 8c8a22ddff71f284b87ca2537e62b2ac, type: 3}
-  bossScale: 1.7
-  bossName: "\uCCA0\uAC11 \uCF54\uBFD4\uC18C"
-  bossTitle: "\uD3D0\uAD11\uC758 \uD30C\uC1C4\uC790"
+  - {fileID: 8618728436101523837, guid: f23ddd001b4515249896e8ae29fc1dc1, type: 3}
+  - {fileID: 4976314102255981459, guid: ba79725e661af97449e21ab601b11356, type: 3}
+  bossModel: {fileID: 1456549009625382073, guid: 289725e52479b574dbbb6e48cc156d3a, type: 3}
+  bossScale: 1.6
+  bossName: "\uD574\uACE8\uC655"
+  bossTitle: "\uD3D0\uAD11\uC758 \uC8FC\uC778"
+  doorModel: {fileID: 919132149155446097, guid: e17099250de7ee643a0d4c7406481236, type: 3}
+  doorHeight: 3.6
   obstacles:
   - {fileID: 4169096484274329770, guid: 3f12c5aeffadbfb48a73664c32368166, type: 3}
   - {fileID: 4416698844278078833, guid: 4d00dbc1ac9ef304aa979e15efe8d2b6, type: 3}
@@ -99,6 +109,13 @@ MonoBehaviour:
   - {fileID: 7837347688433394292, guid: b9133575353e14f4b8bb144ba539ea0a, type: 3}
   - {fileID: 2440083382892032639, guid: c9e60cf83da7fe44b9f358def467ad7a, type: 3}
   - {fileID: 8005598143713518864, guid: f9d2f4ff5338a3e4faec8af19ba73f3f, type: 3}
+  bigObstacles:
+  - {fileID: 5947567890977887509, guid: 980abf2bb03d4814c8a8cad9fd3fa5c2, type: 3}
+  - {fileID: 4335345327989423534, guid: e8d5ba405fa890047bbf6afded7c1441, type: 3}
+  - {fileID: 3419664185192551315, guid: b40ded2a67c914944baff65fd07b2c5d, type: 3}
+  - {fileID: 3709593487142597857, guid: 993e5e0f19ece574b95d47ffad714daf, type: 3}
+  - {fileID: 1000011506362536, guid: 9427ec3486e894940ae4503059700080, type: 3}
+  bigObstacleSize: 3
   obstacleCount: {x: 1, y: 3}
   obstacleScale: {x: 0.7, y: 1.2}
   obstacleClearFromEntry: 4.5

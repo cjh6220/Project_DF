@@ -33,7 +33,10 @@ namespace Proto.Dungeon
         /// 방을 꾸민다. 방 내용물(적·광맥·출구)을 놓기 전에 부르든 뒤에 부르든
         /// 상관없도록 장식에는 콜라이더를 남기지 않는다.
         /// </summary>
-        public void Decorate(Vector2Int cell, Dir exits, Vector3 entry, int runSeed)
+        public void Decorate(Vector2Int cell, Dir exits, Vector3 entry, int runSeed) => Decorate(cell, exits, entry, runSeed, null);
+
+        /// <summary>배치 프리팹(RoomLayout)이 있으면 칸 안 장애물 · 풀은 그 자리에, 없으면 예전처럼 무작위로.</summary>
+        public void Decorate(Vector2Int cell, Dir exits, Vector3 entry, int runSeed, RoomLayout layout)
         {
             Clear();
             if (theme == null) return;
@@ -45,8 +48,16 @@ namespace Proto.Dungeon
 
             BuildBorder(rng, exits);
             BuildLowBorder(rng, exits);
-            BuildObstacles(rng, entry);
-            BuildClutter(rng);
+            if (layout != null)
+            {
+                BuildLayoutObstacles(rng, layout);
+                BuildLayoutClutter(rng, layout);
+            }
+            else
+            {
+                BuildObstacles(rng, entry);
+                BuildClutter(rng);
+            }
 
             if (theme.staticBatch && _spawned.Count > 0)
                 StaticBatchingUtility.Combine(_spawned.ToArray(), decorRoot.gameObject);
@@ -316,6 +327,72 @@ namespace Proto.Dungeon
                     pos.z = Mathf.Clamp(pos.z, -arenaSize.y * 0.5f, arenaSize.y * 0.5f);
                 }
                 Place(theme.clutter, rng, pos, theme.clutterScale);
+            }
+        }
+
+        // ───────────────────────────── 배치 프리팹 ─────────────────────────────
+
+        void BuildLayoutObstacles(System.Random rng, RoomLayout layout)
+        {
+            bool hasBig = theme.bigObstacles != null && theme.bigObstacles.Length > 0;
+            bool hasSmall = theme.obstacles != null && theme.obstacles.Length > 0;
+            foreach (var s in layout.Slots(SlotKind.Obstacle))
+            {
+                var p = new Vector3(s.transform.localPosition.x, 0f, s.transform.localPosition.z);
+                if (s.big && hasBig) PlaceSized(theme.bigObstacles, rng, p, theme.bigObstacleSize * s.scale);
+                else if (hasSmall) Place(theme.obstacles, rng, p, theme.obstacleScale * s.scale);
+            }
+        }
+
+        static readonly Dictionary<GameObject, float> _footprint = new();
+        static readonly Dictionary<GameObject, float> _height = new();
+
+        /// <summary>모델 크기가 제각각이어도 바닥 폭이 size(m)가 되게 맞춰 놓는다 (±15%).</summary>
+        void PlaceSized(GameObject[] pool, System.Random rng, Vector3 localPos, float size)
+        {
+            var prefab = pool[rng.Next(pool.Length)];
+            if (prefab == null) return;
+            var go = Instantiate(prefab, decorRoot);
+            go.transform.localPosition = localPos;
+            go.transform.localRotation = Quaternion.identity;
+            go.transform.localScale = prefab.transform.localScale;
+            go.SetActive(true);
+
+            // 프리팹 에셋의 bounds는 0으로 나올 때가 있다 — 놓은 뒤 실제 크기를 재서 처음 한 번만 기억한다
+            if (!_footprint.TryGetValue(prefab, out float fp))
+            {
+                Bounds bb = default; bool any = false;
+                foreach (var r in go.GetComponentsInChildren<Renderer>()) { if (!any) { bb = r.bounds; any = true; } else bb.Encapsulate(r.bounds); }
+                float k = Mathf.Max(0.0001f, decorRoot.lossyScale.x);
+                fp = any ? Mathf.Max(0.1f, Mathf.Max(bb.size.x, bb.size.z) / k) : 1f;
+                _footprint[prefab] = fp;
+                _height[prefab] = any ? Mathf.Max(0.1f, bb.size.y / k) : 1f;
+            }
+
+            float s = size / fp * Mathf.Lerp(0.85f, 1.15f, (float)rng.NextDouble());
+            // 선돌처럼 홀쭉한 것은 폭에 맞추면 너무 높아진다 — 키는 폭의 1.3배까지
+            s = Mathf.Min(s, size * 1.3f / _height[prefab]);
+            go.transform.localRotation = Quaternion.Euler(0f, (float)rng.NextDouble() * 360f, 0f);
+            go.transform.localScale = prefab.transform.localScale * s;
+            if (theme.stripColliders) foreach (var c in go.GetComponentsInChildren<Collider>()) Destroy(c);
+            _spawned.Add(go);
+        }
+
+        void BuildLayoutClutter(System.Random rng, RoomLayout layout)
+        {
+            if (theme.clutter == null || theme.clutter.Length == 0) return;
+            foreach (var s in layout.Slots(SlotKind.Clutter))
+            {
+                var c = s.transform.localPosition;
+                for (int i = 0; i < s.count; i++)
+                {
+                    float ang = (float)(rng.NextDouble() * Mathf.PI * 2.0);
+                    float rad = (float)rng.NextDouble() * s.radius;
+                    var pos = new Vector3(c.x + Mathf.Cos(ang) * rad, 0f, c.z + Mathf.Sin(ang) * rad);
+                    pos.x = Mathf.Clamp(pos.x, -arenaSize.x * 0.5f, arenaSize.x * 0.5f);
+                    pos.z = Mathf.Clamp(pos.z, -arenaSize.y * 0.5f, arenaSize.y * 0.5f);
+                    Place(theme.clutter, rng, pos, theme.clutterScale);
+                }
             }
         }
 

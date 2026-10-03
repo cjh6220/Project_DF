@@ -1,0 +1,201 @@
+#if UNITY_EDITOR
+using UnityEditor;
+using UnityEditor.Animations;
+using UnityEngine;
+
+namespace Proto.EditorTools
+{
+    /// <summary>
+    /// 사람형 몬스터(좀비·미라·해골)를 몬스터로 쓸 수 있게 만든다. 메뉴: Proto ▸ Build Undead Monsters
+    ///
+    ///   팩 프리팹에는 배회 스크립트 · NavMeshAgent · CharacterController가 붙어 있어서
+    ///   그대로 쓰면 길찾기 경고가 쏟아진다 → 겉모습만 남긴 몬스터용 프리팹을 따로 만든다.
+    ///   애니메이터도 EnemyVisual이 쓰는 이름(Idle · Walk · Run · Attack · Death / isWalking · isRunning · isDead)으로 새로 짠다.
+    ///
+    ///   좀비 · 미라   비틀거리는 좀비 걸음 + 할퀴기
+    ///   해골          보통 걸음 + 찌르기
+    ///
+    /// 만든 뒤 폐광(Stage2_Mine) 테마의 몬스터 목록에 넣는다.
+    /// </summary>
+    public static class MonsterBuilder
+    {
+        const string Pack = "Assets/polyperfect/Low Poly Animated People/";
+        const string Anim = Pack + "- Animations/In Place/";
+        const string OutCtl = "Assets/_Project/Animations/Monsters/";
+        const string OutPrefab = "Assets/_Project/Prefabs/Monsters/";
+
+        [MenuItem("Proto/Build Undead Monsters")]
+        public static void Build()
+        {
+            System.IO.Directory.CreateDirectory(OutCtl);
+            System.IO.Directory.CreateDirectory(OutPrefab);
+
+            var zombie = Controller("Monster_Zombie",
+                Clip("Zombie/Zombie_Idle_1"), Clip("Zombie/Zombie_Walk"), Clip("Zombie/Zombie_Run"),
+                Clip("Zombie/Zombie_Attack"), Clip("Deaths/Death_FallForwards"), 1.0f);
+            var skeleton = Controller("Monster_Skeleton",
+                Clip("Idles/Idle_Generic"), Clip("Locomotion/Walk_Male"), Clip("Locomotion/Run_InPlace"),
+                Clip("Pirate/Pirate_Stab"), Clip("Deaths/Death_Slashed"), 1.15f);
+
+            var zm = Monster("Zombie_M", "man_zombie", zombie);
+            var zf = Monster("Zombie_F", "woman_zombie", zombie);
+            var mm = Monster("Mummy_M", "man_mummy", zombie);
+            var mf = Monster("Mummy_F", "woman_mummy", zombie);
+            var sk = Monster("Skeleton", "man_skeleton", skeleton);
+
+            var king = BuildSkeletonKing();
+
+            var mine = AssetDatabase.LoadAssetAtPath<Proto.Data.StageTheme>("Assets/_Project/Data/Stage2_Mine.asset");
+            if (mine != null)
+            {
+                if (king != null)
+                {
+                    mine.bossModel = king;
+                    mine.bossScale = 1.6f;      // 모델 키 1.85m × 1.6 ≈ 3m
+                    mine.bossName = "해골왕";
+                    mine.bossTitle = "폐광의 주인";
+                }
+                // 해골이 가장 자주 나오게 두 번 넣는다
+                mine.enemyModels = new[] { sk, sk, zm, zf, mm, mf };
+                mine.championModels = new[] { sk, mm };
+                EditorUtility.SetDirty(mine);
+            }
+            AssetDatabase.SaveAssets();
+            Debug.Log("[Proto] 언데드 몬스터 준비 완료 — 폐광 몬스터 목록 교체");
+        }
+
+        const string KingModel = "Assets/Model/SkeletonKing/SkeletonKing.fbx";
+
+        /// <summary>
+        /// 해골왕 (Tripo 생성 · Mixamo 뼈 이름 → 휴머노이드). 보스가 쓰는 상태:
+        ///   Idle · Walk · Run · Attack(할퀴기) · ChestHit(포효 — 몸을 들썩임) · Death
+        /// 팩의 Wizard 클립은 골반 높이가 0으로 구워져 있어 땅에 박힌다 — 쓰지 않는다.
+        /// </summary>
+        static GameObject BuildSkeletonKing()
+        {
+            var imp = AssetImporter.GetAtPath(KingModel) as ModelImporter;
+            if (imp == null) { Debug.LogWarning("[Proto] 해골왕 모델 없음: " + KingModel); return null; }
+            if (imp.animationType != ModelImporterAnimationType.Human)
+            {
+                imp.animationType = ModelImporterAnimationType.Human;
+                imp.avatarSetup = ModelImporterAvatarSetup.CreateFromThisModel;
+                imp.importAnimation = false;
+                imp.SaveAndReimport();
+            }
+
+            string path = OutCtl + "Boss_SkeletonKing.controller";
+            AssetDatabase.DeleteAsset(path);
+            var c = AnimatorController.CreateAnimatorControllerAtPath(path);
+            var sm = c.layers[0].stateMachine;
+            AnimatorState S(string n, AnimationClip clip) { var st = sm.AddState(n); st.motion = clip; return st; }
+            var idle = S("Idle", Clip("Idles/Idle_Generic"));
+            S("Walk", Clip("Pirate/Pirate_Walk"));
+            S("Run", Clip("Locomotion/Run_InPlace"));
+            var atk = S("Attack", Clip("Zombie/Zombie_Attack"));
+            var roar = S("ChestHit", Clip("Zombie/Zombie_Idle_1"));
+            S("Death", Clip("Deaths/Death_FallForwards"));
+            sm.defaultState = idle;
+            foreach (var st in new[] { atk, roar })
+            {
+                var t = st.AddTransition(idle);
+                t.hasExitTime = true; t.exitTime = 0.95f; t.duration = 0.12f;
+            }
+            EditorUtility.SetDirty(c);
+
+            var src = AssetDatabase.LoadAssetAtPath<GameObject>(KingModel);
+            var go = (GameObject)PrefabUtility.InstantiatePrefab(src);
+            PrefabUtility.UnpackPrefabInstance(go, PrefabUnpackMode.Completely, InteractionMode.AutomatedAction);
+            go.name = "SkeletonKing";
+            var an = go.GetComponent<Animator>();
+            if (an == null) an = go.AddComponent<Animator>();
+            an.runtimeAnimatorController = c;
+            an.applyRootMotion = false;
+            an.cullingMode = AnimatorCullingMode.AlwaysAnimate;
+            foreach (var r in go.GetComponentsInChildren<SkinnedMeshRenderer>(true)) r.updateWhenOffscreen = true;
+            var saved = PrefabUtility.SaveAsPrefabAsset(go, OutPrefab + "SkeletonKing.prefab");
+            Object.DestroyImmediate(go);
+            return saved;
+        }
+
+        static AnimationClip Clip(string path)
+        {
+            foreach (var o in AssetDatabase.LoadAllAssetsAtPath(Anim + path + ".fbx"))
+                if (o is AnimationClip c && !c.name.StartsWith("__preview__")) return c;
+            Debug.LogWarning("[Proto] 클립 없음: " + path);
+            return null;
+        }
+
+        static AnimatorController Controller(string name, AnimationClip idle, AnimationClip walk, AnimationClip run,
+                                             AnimationClip attack, AnimationClip death, float attackSpeed)
+        {
+            string path = OutCtl + name + ".controller";
+            AssetDatabase.DeleteAsset(path);
+            var c = AnimatorController.CreateAnimatorControllerAtPath(path);
+            c.AddParameter("isWalking", AnimatorControllerParameterType.Bool);
+            c.AddParameter("isRunning", AnimatorControllerParameterType.Bool);
+            c.AddParameter("isDead", AnimatorControllerParameterType.Bool);
+            var sm = c.layers[0].stateMachine;
+
+            var sIdle = sm.AddState("Idle"); sIdle.motion = idle;
+            var sWalk = sm.AddState("Walk"); sWalk.motion = walk;
+            var sRun = sm.AddState("Run"); sRun.motion = run;
+            var sAtk = sm.AddState("Attack"); sAtk.motion = attack; sAtk.speed = attackSpeed;
+            var sDeath = sm.AddState("Death"); sDeath.motion = death;
+            sm.defaultState = sIdle;
+
+            Go(sIdle, sWalk, "isWalking", true);
+            Go(sIdle, sRun, "isRunning", true);
+            Go(sWalk, sIdle, "isWalking", false, "isRunning", false);
+            Go(sWalk, sRun, "isRunning", true);
+            Go(sRun, sWalk, "isRunning", false, "isWalking", true);
+            Go(sRun, sIdle, "isRunning", false, "isWalking", false);
+
+            // 공격은 EnemyVisual이 직접 재생한다 — 끝나면 서 있기로
+            var back = sAtk.AddTransition(sIdle);
+            back.hasExitTime = true; back.exitTime = 0.9f; back.duration = 0.1f;
+
+            // 사망도 직접 재생하지만, 파라미터로도 들어갈 수 있게
+            var die = sm.AddAnyStateTransition(sDeath);
+            die.AddCondition(AnimatorConditionMode.If, 0f, "isDead");
+            die.canTransitionToSelf = false; die.duration = 0.08f; die.hasExitTime = false;
+
+            EditorUtility.SetDirty(c);
+            return c;
+        }
+
+        static void Go(AnimatorState from, AnimatorState to, string p, bool v, string p2 = null, bool v2 = false)
+        {
+            var t = from.AddTransition(to);
+            t.hasExitTime = false; t.duration = 0.15f;
+            t.AddCondition(v ? AnimatorConditionMode.If : AnimatorConditionMode.IfNot, 0f, p);
+            if (p2 != null) t.AddCondition(v2 ? AnimatorConditionMode.If : AnimatorConditionMode.IfNot, 0f, p2);
+        }
+
+        /// <summary>팩 프리팹에서 겉모습만 남겨 몬스터용 프리팹으로 저장한다.</summary>
+        static GameObject Monster(string name, string packPrefab, AnimatorController ctl)
+        {
+            var src = AssetDatabase.LoadAssetAtPath<GameObject>(Pack + "- Prefabs/" + packPrefab + ".prefab");
+            if (src == null) { Debug.LogWarning("[Proto] 프리팹 없음: " + packPrefab); return null; }
+            var go = (GameObject)PrefabUtility.InstantiatePrefab(src);
+            PrefabUtility.UnpackPrefabInstance(go, PrefabUnpackMode.Completely, InteractionMode.AutomatedAction);
+            go.name = name;
+
+            foreach (var mb in go.GetComponentsInChildren<MonoBehaviour>(true)) Object.DestroyImmediate(mb);
+            foreach (var ag in go.GetComponentsInChildren<UnityEngine.AI.NavMeshAgent>(true)) Object.DestroyImmediate(ag);
+            foreach (var cc in go.GetComponentsInChildren<CharacterController>(true)) Object.DestroyImmediate(cc);
+            foreach (var col in go.GetComponentsInChildren<Collider>(true)) Object.DestroyImmediate(col);
+            foreach (var rb in go.GetComponentsInChildren<Rigidbody>(true)) Object.DestroyImmediate(rb);
+
+            var an = go.GetComponentInChildren<Animator>();
+            an.runtimeAnimatorController = ctl;
+            an.applyRootMotion = false;
+            an.cullingMode = AnimatorCullingMode.AlwaysAnimate;
+
+            var path = OutPrefab + name + ".prefab";
+            var saved = PrefabUtility.SaveAsPrefabAsset(go, path);
+            Object.DestroyImmediate(go);
+            return saved;
+        }
+    }
+}
+#endif

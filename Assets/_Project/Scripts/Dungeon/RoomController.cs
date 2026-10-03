@@ -43,6 +43,16 @@ namespace Proto.Dungeon
         public void SetConfig(TuningConfig c) => cfg = c;
         public RoomDecorator Decorator => decorator;
 
+        /// <summary>지금 던전 id — 던전 전용 방 배치를 고를 때 쓴다 (RunManager가 넣는다).</summary>
+        public string DungeonId { get; set; } = "";
+        /// <summary>이 방의 배치 프리팹. 없으면 예전처럼 무작위.</summary>
+        RoomLayout _layout;
+        /// <summary>보스방으로 이어지는 출구 방향 (RunManager가 Build 전에 넣는다).</summary>
+        public Dir BossDirs { get; set; }
+        readonly Dictionary<Dir, ExitDoor> _doors = new();
+        static GameObject _torii;
+        readonly List<LayoutSlot> _freeEnemySlots = new();
+
         /// <summary>
         /// 마을에 있는 동안 던전 아레나를 통째로 숨긴다. 마을과 아레나는 같은 자리에 겹쳐 있다.
         /// 숨길 때 내용물(몬스터·광맥·출구)도 치운다.
@@ -96,10 +106,13 @@ namespace Proto.Dungeon
             bool bossRoom = room.Kind == RoomKind.Boss;
             Cleared = room.Cleared || (!bossRoom && (room.EnemyCount + room.Champions.Count) == 0);
             _entry = EntryPointFor(enteredFrom);
+            _layout = RoomLayout.Pick(room.Kind, DungeonId, runSeed, room.Cell);
+            _freeEnemySlots.Clear();
+            if (_layout != null) _freeEnemySlots.AddRange(_layout.Slots(SlotKind.Enemy));
 
             // 장식을 먼저 깐다. 장식에는 콜라이더가 없으므로 내용물과 겹쳐도 상관없다.
             if (decorator != null)
-                decorator.Decorate(room.Cell, room.Exits, _entry, runSeed);
+                decorator.Decorate(room.Cell, room.Exits, _entry, runSeed, _layout);
 
             if (!Cleared)
             {
@@ -203,6 +216,7 @@ namespace Proto.Dungeon
             if (room.Ores == null)
             {
                 room.Ores = new List<OreSpot>();
+                var oreSlots = _layout != null ? _layout.Slots(SlotKind.Ore) : new List<LayoutSlot>();
                 for (int i = 0; i < room.OreCount; i++)
                 {
                     // 깊은 방일수록 상급 광맥 확률이 오른다
@@ -214,7 +228,7 @@ namespace Proto.Dungeon
                         OreGrade.Common;
 
                     room.Ores.Add(new OreSpot {
-                        LocalPos = RandomPoint(0.8f) - contentRoot.position,
+                        LocalPos = (i < oreSlots.Count ? new Vector3(oreSlots[i].transform.localPosition.x, 0f, oreSlots[i].transform.localPosition.z) : RandomPoint(0.8f)) - contentRoot.position,
                         Grade = grade,
                         Amount = grade == OreGrade.Rare ? 1 : UnityEngine.Random.Range(1, 3)
                     });
@@ -243,6 +257,7 @@ namespace Proto.Dungeon
         void SpawnExits(Room room)
         {
             _exits.Clear();
+            _doors.Clear();
             foreach (var d in DungeonMap.AllDirs)
             {
                 if ((room.Exits & d) == 0) continue;
@@ -264,6 +279,15 @@ namespace Proto.Dungeon
                 var gate = go.GetComponent<ExitGate>();
                 if (gate == null) gate = go.AddComponent<ExitGate>();
                 gate.Setup(d, dir => ExitUsed?.Invoke(dir));
+
+                // 겉모습은 테마 문 모델 — 예전 상자는 판정만 남기고 숨긴다
+                foreach (var r in go.GetComponentsInChildren<Renderer>()) r.enabled = false;
+                var theme = decorator != null ? decorator.Theme : null;
+                var model = theme != null && theme.doorModel != null ? theme.doorModel : Torii();
+                var door = ExitDoor.Build(contentRoot, d, model, theme != null ? theme.doorHeight : 3.6f, RoomLayout.ExitHalf * 2f, (BossDirs & d) != 0);
+                door.transform.position = contentRoot.position + pos;
+                _spawned.Add(door.gameObject);
+                _doors[d] = door;
             }
         }
 
@@ -301,6 +325,7 @@ namespace Proto.Dungeon
                 var gate = kv.Value.GetComponent<ExitGate>();
                 if (gate != null) gate.SetOpen(Cleared);
             }
+            foreach (var kv in _doors) if (kv.Value != null) kv.Value.SetOpen(Cleared);
         }
 
         /// <summary>
@@ -312,6 +337,21 @@ namespace Proto.Dungeon
         /// </summary>
         Vector3 EnemySpawnPoint()
         {
+            // 배치에 몬스터 자리가 있으면 입구에서 먼 자리부터 쓴다 (자리가 모자라면 아래 무작위로)
+            if (_freeEnemySlots.Count > 0)
+            {
+                LayoutSlot pick = null; float far = -1f;
+                foreach (var s in _freeEnemySlots)
+                {
+                    float dd = Vector3.Distance(s.transform.localPosition, _entry);
+                    if (dd > far) { far = dd; pick = s; }
+                }
+                _freeEnemySlots.Remove(pick);
+                var lp = pick.transform.localPosition;
+                var spot = new Vector3(lp.x, 0f, lp.z) + new Vector3(UnityEngine.Random.Range(-0.4f, 0.4f), 0f, UnityEngine.Random.Range(-0.4f, 0.4f));
+                _enemySpots.Add(spot);
+                return spot;
+            }
             float safe = cfg != null ? cfg.enemySpawnSafeRadius : 5f;
             float gap  = cfg != null ? cfg.enemySpawnSpacing : 3f;
 
@@ -352,6 +392,13 @@ namespace Proto.Dungeon
             _enemySpots.Clear();
             _enemies.Clear();
             _exits.Clear();
+            _doors.Clear();
+        }
+
+        static GameObject Torii()
+        {
+            if (_torii == null) _torii = Resources.Load<GameObject>("Doors/Torii");
+            return _torii;
         }
     }
 }

@@ -23,6 +23,7 @@ namespace Proto.UI
         RectTransform _toast, _shine;
         CanvasGroup _toastCg;
         TextMeshProUGUI _toastGlyph, _toastName, _toastSub;
+        Image _toastDevice;
         Coroutine _toastCo;
 
         readonly Dictionary<TMP_Text, Coroutine> _running = new Dictionary<TMP_Text, Coroutine>();
@@ -45,6 +46,7 @@ namespace Proto.UI
             if (font != null) font.TryAddCharacters("듀얼센스쇼크4Xbox패드키보드버튼표시를바꿨습니다□△○×ABXYZC RBLT/OPTIONSMenuEsc대화닫기마을로포기구매선택이동확대축소");
             BuildToast();
             GameInput.SchemeChanged += OnSchemeChanged;
+            _lastScheme = GameInput.Scheme;
         }
 
         void OnDestroy() => GameInput.SchemeChanged -= OnSchemeChanged;
@@ -129,16 +131,18 @@ namespace Proto.UI
             scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
             scaler.referenceResolution = new Vector2(1920f, 1080f);
 
-            var border = UiKit.Image(canvasGo.transform, "Toast", new Color(0.86f, 0.64f, 0.30f, 1f), UiArt.RoundRectFill);
+            // 알림 띠 — 어두운 유리 + 왼쪽 금색 막대 (Resources/UI/Toast)
+            var toastSpr = UiKit.Ui("Toast");
+            var border = UiKit.Image(canvasGo.transform, "Toast", Color.white, toastSpr != null ? toastSpr : UiArt.RoundRectFill);
             border.type = Image.Type.Sliced;
             _toast = border.rectTransform;
             _toast.anchorMin = _toast.anchorMax = new Vector2(1f, 0f);
             _toast.pivot = new Vector2(1f, 0f);
-            _toast.sizeDelta = new Vector2(360f, 84f);
+            _toast.sizeDelta = new Vector2(420f, 92f);
             _toastCg = border.gameObject.AddComponent<CanvasGroup>();
             _toastCg.blocksRaycasts = false;
 
-            var panel = UiKit.Image(_toast, "Panel", new Color(0.09f, 0.075f, 0.12f, 0.97f), UiArt.RoundRectFill);
+            var panel = UiKit.Image(_toast, "Panel", toastSpr != null ? Color.clear : new Color(0.09f, 0.075f, 0.12f, 0.97f), UiArt.RoundRectFill);
             panel.type = Image.Type.Sliced;
             UiKit.Stretch(panel.rectTransform);
             panel.rectTransform.offsetMin = new Vector2(2f, 2f);
@@ -146,54 +150,64 @@ namespace Proto.UI
             panel.gameObject.AddComponent<RectMask2D>();
 
             // 훑고 지나가는 빛줄기
-            var shine = UiKit.Image(panel.transform, "Shine", new Color(1f, 0.9f, 0.6f, 0.35f), UiKit.Soft);
+            var shine = UiKit.Image(panel.transform, "Shine", new Color(1f, 0.92f, 0.7f, 0.18f), UiKit.Soft);
             _shine = shine.rectTransform;
             _shine.anchorMin = _shine.anchorMax = new Vector2(0f, 0.5f);
             _shine.sizeDelta = new Vector2(90f, 220f);
             _shine.localRotation = Quaternion.Euler(0f, 0f, -20f);
 
-            _toastGlyph = UiKit.Text(panel.transform, "Glyph", "", 34);
+            // 왼쪽: 장치 그림 (패드 · 키보드 · 휴대용)
+            _toastDevice = UiKit.Image(panel.transform, "Device", Color.white, UiKit.Ui("Device_Keyboard"));
+            _toastDevice.preserveAspect = true;
+            var dv = _toastDevice.rectTransform;
+            dv.anchorMin = dv.anchorMax = new Vector2(0f, 0.5f);
+            dv.pivot = new Vector2(0f, 0.5f);
+            dv.anchoredPosition = new Vector2(26f, 0f);
+            dv.sizeDelta = new Vector2(96f, 66f);
+
+            // 아래 줄: 얼굴 버튼 아이콘 + 안내
+            _toastGlyph = UiKit.Text(panel.transform, "Glyph", "", 22, TextAlignmentOptions.Left);
             var g = _toastGlyph.rectTransform;
             g.anchorMin = g.anchorMax = new Vector2(0f, 0.5f);
             g.pivot = new Vector2(0f, 0.5f);
-            g.anchoredPosition = new Vector2(22f, 0f);
-            g.sizeDelta = new Vector2(120f, 50f);
+            g.anchoredPosition = new Vector2(140f, -17f);
+            g.sizeDelta = new Vector2(260f, 30f);
 
             _toastName = UiKit.Text(panel.transform, "Name", "", 26, TextAlignmentOptions.Left);
             var n = _toastName.rectTransform;
             n.anchorMin = n.anchorMax = new Vector2(0f, 0.5f);
             n.pivot = new Vector2(0f, 0.5f);
-            n.anchoredPosition = new Vector2(150f, 12f);
-            n.sizeDelta = new Vector2(200f, 34f);
+            n.anchoredPosition = new Vector2(140f, 15f);
+            n.sizeDelta = new Vector2(260f, 34f);
             _toastName.fontStyle = FontStyles.Bold;
 
-            _toastSub = UiKit.Text(panel.transform, "Sub", "", 17, TextAlignmentOptions.Left);
+            _toastSub = UiKit.Text(panel.transform, "Sub", "", 17, TextAlignmentOptions.Right);
             var s = _toastSub.rectTransform;
             s.anchorMin = s.anchorMax = new Vector2(0f, 0.5f);
             s.pivot = new Vector2(0f, 0.5f);
-            s.anchoredPosition = new Vector2(150f, -16f);
-            s.sizeDelta = new Vector2(200f, 24f);
+            s.anchoredPosition = new Vector2(140f, -17f);
+            s.sizeDelta = new Vector2(256f, 24f);
             _toastSub.color = new Color(0.66f, 0.63f, 0.74f, 1f);
 
             border.gameObject.SetActive(false);
         }
 
+        InputScheme _lastScheme;
+
         void OnSchemeChanged()
         {
-            switch (GameInput.Scheme)
-            {
-                case InputScheme.PlayStation:
-                    _toastGlyph.text = "<color=#ff9ad5>□</color><color=#5fe3b0>△</color><color=#ff6b6b>○</color><color=#86b6ff>×</color>";
-                    break;
-                case InputScheme.Xbox:
-                    _toastGlyph.text = "<color=#6ad35a>A</color><color=#ff5a5a>B</color><color=#4aa3ff>X</color><color=#ffd23a>Y</color>";
-                    break;
-                default:
-                    _toastGlyph.text = "<color=#ffd45a>Z X C</color>";
-                    break;
-            }
+            // 키 재설정 · 설정 변경으로도 신호가 오지만, 알림은 장치가 실제로 바뀌었을 때만 띄운다
+            if (GameInput.Scheme == _lastScheme) return;
+            _lastScheme = GameInput.Scheme;
+            // 장치 그림 — 휴대용(리눅스에서 패드 = 스팀덱으로 본다)
+            string dev = GameInput.Scheme == InputScheme.PlayStation ? "Device_PS"
+                       : GameInput.Scheme == InputScheme.Xbox ? (Application.platform == RuntimePlatform.LinuxPlayer ? "Device_Handheld" : "Device_Xbox")
+                       : "Device_Keyboard";
+            var spr = UiKit.Ui(dev);
+            if (spr != null) _toastDevice.sprite = spr;
+            _toastGlyph.text = InputGlyphs.FaceButtons();
             _toastName.text = GameInput.DeviceName;
-            _toastSub.text = "버튼 표시를 바꿨습니다";
+            _toastSub.text = "버튼 표시 바뀜";
             if (_toastCo != null) StopCoroutine(_toastCo);
             _toastCo = StartCoroutine(ShowToast());
         }

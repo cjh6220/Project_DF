@@ -83,6 +83,8 @@ MonoBehaviour:
   bossScale: 2.3
   bossName: "\uAC80\uC740 \uAC08\uAE30"
   bossTitle: "\uADE0\uC5F4\uC758 \uAD70\uC8FC"
+  doorModel: {fileID: 919132149155446097, guid: 46e25b4c5ec319f498a4281eb7ae0997, type: 3}
+  doorHeight: 3.6
   obstacles:
   - {fileID: 3832213103267475035, guid: bcda1cecb7a274e48843641935bf94e4, type: 3}
   - {fileID: 76070903422821017, guid: b9e03015ec91cac449e083e014a76285, type: 3}
@@ -97,6 +99,12 @@ MonoBehaviour:
   - {fileID: 4731041251265943480, guid: 802993c0a67c1474a8e45bec6ae1a495, type: 3}
   - {fileID: 4159993300826327241, guid: 5f7dbd80b21547d4b858ab33922e2740, type: 3}
   - {fileID: 8264468213022692365, guid: 369456f238c2221498ccdf16df24b160, type: 3}
+  bigObstacles:
+  - {fileID: 1000011506362536, guid: 9427ec3486e894940ae4503059700080, type: 3}
+  - {fileID: 2456701532441760096, guid: 523f80a8e8777514f960f6cb18eca1a2, type: 3}
+  - {fileID: 6104115542328774656, guid: 6c06c79f3145dc24f9eada4ab7f83d0b, type: 3}
+  - {fileID: 3709593487142597857, guid: 993e5e0f19ece574b95d47ffad714daf, type: 3}
+  bigObstacleSize: 3
   obstacleCount: {x: 1, y: 3}
   obstacleScale: {x: 0.7, y: 1.2}
   obstacleClearFromEntry: 4.5

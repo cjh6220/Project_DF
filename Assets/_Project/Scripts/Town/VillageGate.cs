@@ -177,11 +177,19 @@ namespace Proto.Town
                     _fired = true;
                     _flare = 1f;
                     village.OnGateEntered();
+                    Proto.Feel.Haptics.Pulse(0.9f, 1f, 0.3f);   // 빨려 들어가는 순간 — 가장 세게
                 }
             }
             else if (!_fired)
             {
                 _charge = Mathf.Max(0f, _charge - dt / Mathf.Max(0.05f, releaseTime));
+            }
+
+            // 소용돌이가 빨라지는 만큼 진동도 약하게 시작해서 점점 세진다 (물러나면 같이 잦아든다)
+            if (_charge > 0.001f && !_fired)
+            {
+                float k = _charge;
+                Proto.Feel.Haptics.Hold(0.06f + 0.5f * Mathf.Pow(k, 1.5f), 0.75f * Mathf.Pow(k, 2.5f));
             }
         }
 

@@ -1,0 +1,357 @@
+using System;
+using System.Collections.Generic;
+using UnityEngine;
+using Proto.Core;
+using Proto.Data;
+using Proto.Enemy;
+using Proto.Mining;
+
+namespace Proto.Dungeon
+{
+    /// <summary>
+    /// 씬에 실제로 존재하는 방 하나. 프로토타입에서는 아레나 하나를 재활용하고
+    /// 내용물(적·광맥·출구)만 갈아끼운다.
+    ///
+    /// 방 클리어 조건: 몬스터 전멸. 전투는 선택이 아니라 통행료다.
+    /// </summary>
+    public class RoomController : MonoBehaviour
+    {
+        [SerializeField] TuningConfig cfg;
+        [SerializeField] Transform contentRoot;
+        [SerializeField] GameObject enemyPrefab;
+        [SerializeField] GameObject orePrefab;
+        [SerializeField] GameObject exitPrefab;
+        [SerializeField] Vector2 arenaSize = new Vector2(18f, 10f);
+        [SerializeField] RoomDecorator decorator;
+        [Tooltip("보스 공격 예고(바닥 장판) 머티리얼")]
+        [SerializeField] Material telegraphMaterial;
+
+        readonly List<GameObject> _spawned = new();
+        readonly List<Health> _enemies = new();
+        readonly Dictionary<Dir, GameObject> _exits = new();
+        readonly List<Vector3> _enemySpots = new();
+
+        /// <summary>이번 방에서 플레이어가 들어선 자리. 몬스터 배치의 기준점이다.</summary>
+        Vector3 _entry;
+
+        /// <summary>지금 지어 놓은 방. 전멸·채굴 결과를 여기에 되돌려 기록한다.</summary>
+        Room _room;
+
+        public bool Cleared { get; private set; }
+
+        /// <summary>RunManager가 런타임 사본을 물려준다 (성장 노드 반영본).</summary>
+        public void SetConfig(TuningConfig c) => cfg = c;
+        public RoomDecorator Decorator => decorator;
+
+        /// <summary>
+        /// 마을에 있는 동안 던전 아레나를 통째로 숨긴다. 마을과 아레나는 같은 자리에 겹쳐 있다.
+        /// 숨길 때 내용물(몬스터·광맥·출구)도 치운다.
+        /// </summary>
+        public void SetVisible(bool visible)
+        {
+            if (!visible)
+            {
+                StopAllCoroutines();
+                ClearContents();
+                if (decorator != null) decorator.Clear();
+            }
+            if (contentRoot != null) contentRoot.gameObject.SetActive(visible);
+        }
+
+        public event Action Clearedchanged;
+        public event Action<bool> EnemyKilled;   // (elite)
+        public event Action<Dir> ExitUsed;
+        public event Action<OreNode> OreMined;
+        /// <summary>보스를 쓰러뜨린 순간.</summary>
+        public event Action BossKilled;
+
+        /// <summary>
+        /// 플레이어가 이 방에 들어섰을 때 서는 자리.
+        /// 들어온 쪽 벽 안쪽이다 — 아래 방에서 올라왔으면 이 방의 아래쪽에서 시작한다.
+        /// 방 한가운데에 떨어뜨리면 몬스터 한복판에 서게 되어 입장과 동시에 맞는다.
+        /// </summary>
+        public Vector3 EntryPointFor(Dir enteredFrom)
+        {
+            float inset = cfg != null ? cfg.roomEntryInset : 2f;
+            Vector3 p = enteredFrom switch
+            {
+                Dir.N => new Vector3(0f, 0f,  arenaSize.y * 0.5f - inset),
+                Dir.S => new Vector3(0f, 0f, -arenaSize.y * 0.5f + inset),
+                Dir.E => new Vector3( arenaSize.x * 0.5f - inset, 0f, 0f),
+                Dir.W => new Vector3(-arenaSize.x * 0.5f + inset, 0f, 0f),
+                // 던전 입장 — 남쪽에서 들어온 것으로 친다
+                _     => new Vector3(0f, 0f, -arenaSize.y * 0.5f + inset)
+            };
+            return contentRoot.position + p;
+        }
+
+        public void Build(Room room, Transform player, Dir enteredFrom = Dir.None, int runSeed = 0)
+        {
+            ClearContents();
+            _room = room;
+
+            // 한 번 비운 방은 비워진 채로 남는다.
+            // 되살아나면 되돌아가는 길이 또 통행료를 받는 셈이고,
+            // 무한 파밍이 되어 피로도라는 예산 자체가 무의미해진다.
+            bool bossRoom = room.Kind == RoomKind.Boss;
+            Cleared = room.Cleared || (!bossRoom && (room.EnemyCount + room.Champions.Count) == 0);
+            _entry = EntryPointFor(enteredFrom);
+
+            // 장식을 먼저 깐다. 장식에는 콜라이더가 없으므로 내용물과 겹쳐도 상관없다.
+            if (decorator != null)
+                decorator.Decorate(room.Cell, room.Exits, _entry, runSeed);
+
+            if (!Cleared)
+            {
+                if (bossRoom) SpawnBoss(player);
+                else SpawnEnemies(room, player);
+            }
+            SpawnOres(room);
+            SpawnExits(room);
+            RefreshExits();
+        }
+
+        void SpawnEnemies(Room room, Transform player)
+        {
+            // 일반 몬스터 — 넉백과 경직이 통한다
+            for (int i = 0; i < room.EnemyCount; i++)
+                SpawnOne(player, Proto.Enemy.Affix.None);
+
+            // 챔피언 — 접두사가 붙은 강화 몬스터
+            foreach (var affix in room.Champions)
+                SpawnOne(player, affix);
+        }
+
+        void SpawnOne(Transform player, Proto.Enemy.Affix affix)
+        {
+            var pos = EnemySpawnPoint();
+            var go = Instantiate(enemyPrefab, pos, Quaternion.identity, contentRoot);
+            go.SetActive(true);
+            _spawned.Add(go);
+
+            // 테마에서 모델을 뽑아 붙인다. 없으면 프리팹에 붙어 있는 것을 그대로 쓴다.
+            var ev = go.GetComponent<Proto.Enemy.EnemyVisual>();
+            if (ev != null && decorator != null && decorator.Theme != null)
+            {
+                bool champion = affix != Proto.Enemy.Affix.None;
+                var pool = champion && decorator.Theme.championModels != null && decorator.Theme.championModels.Length > 0
+                         ? decorator.Theme.championModels
+                         : decorator.Theme.enemyModels;
+                if (pool != null && pool.Length > 0)
+                    ev.SetModel(pool[UnityEngine.Random.Range(0, pool.Length)]);
+            }
+
+            var ec = go.GetComponent<EnemyController>();
+            if (ec != null) ec.Configure(cfg, player, affix);
+
+            var hp = go.GetComponent<Health>();
+            if (hp != null)
+            {
+                _enemies.Add(hp);
+                bool champion = affix != Proto.Enemy.Affix.None;
+                hp.Died += () => OnEnemyDied(hp, go, champion);
+            }
+        }
+
+        /// <summary>
+        /// 보스방 — 일반 몬스터 없이 보스 하나. 입구 반대편에 선다.
+        /// 템플릿 없이 코드로 조립한다 (보스는 하나뿐이고 구성이 다르다).
+        /// </summary>
+        void SpawnBoss(Transform player)
+        {
+            var theme = decorator != null ? decorator.Theme : null;
+            if (telegraphMaterial != null) Telegraph.SetMaterial(telegraphMaterial);
+
+            Vector3 center = contentRoot.position;
+            Vector3 away = center - _entry; away.y = 0f;
+            Vector3 pos = center + (away.sqrMagnitude > 0.01f ? away.normalized * 3.5f : Vector3.forward * 3f);
+
+            var go = new GameObject("Boss");
+            go.transform.SetParent(contentRoot, false);
+            go.transform.position = pos;
+            go.layer = LayerMask.NameToLayer("Enemy");
+            _spawned.Add(go);
+
+            // 몸통 크기는 스케일 적용 전 기준 (스케일 2면 키 3.4m)
+            var cc = go.AddComponent<CharacterController>();
+            cc.height = 1.7f; cc.radius = 0.5f; cc.center = new Vector3(0f, 0.85f, 0f);
+            var hp = go.AddComponent<Health>();
+            var boss = go.AddComponent<BossController>();
+
+            boss.Configure(cfg, player, center, arenaSize * 0.5f,
+                theme != null ? theme.bossModel : null,
+                theme != null ? theme.bossScale : 2f,
+                theme != null ? theme.bossName : "보스",
+                theme != null ? theme.bossTitle : "");
+
+            _enemies.Add(hp);
+            hp.Died += () =>
+            {
+                _enemies.Remove(hp);
+                Cleared = true;
+                if (_room != null) _room.Cleared = true;
+                RefreshExits();
+                Clearedchanged?.Invoke();
+                BossKilled?.Invoke();
+                // 시체는 치우지 않는다 — 쓰러진 보스를 보는 것도 보상이다
+            };
+        }
+
+        void SpawnOres(Room room)
+        {
+            // 처음 들어온 방이면 광맥 자리를 정한다. 한 번 정하면 그대로 간다.
+            if (room.Ores == null)
+            {
+                room.Ores = new List<OreSpot>();
+                for (int i = 0; i < room.OreCount; i++)
+                {
+                    // 깊은 방일수록 상급 광맥 확률이 오른다
+                    int depth = room.Cell.y;
+                    float roll = UnityEngine.Random.value;
+                    OreGrade grade =
+                        roll < 0.08f + depth * 0.02f ? OreGrade.Rare :
+                        roll < 0.35f + depth * 0.05f ? OreGrade.Deep :
+                        OreGrade.Common;
+
+                    room.Ores.Add(new OreSpot {
+                        LocalPos = RandomPoint(0.8f) - contentRoot.position,
+                        Grade = grade,
+                        Amount = grade == OreGrade.Rare ? 1 : UnityEngine.Random.Range(1, 3)
+                    });
+                }
+            }
+
+            foreach (var spot in room.Ores)
+            {
+                if (spot.Mined) continue;   // 이미 캐 간 자리
+
+                var go = Instantiate(orePrefab, contentRoot.position + spot.LocalPos,
+                                     Quaternion.identity, contentRoot);
+                go.SetActive(true);
+                _spawned.Add(go);
+
+                var ore = go.GetComponent<OreNode>();
+                if (ore == null) continue;
+
+                ore.Configure(spot.Grade, spot.Amount);
+
+                var captured = spot;
+                ore.Mined += o => { captured.Mined = true; OreMined?.Invoke(o); };
+            }
+        }
+
+        void SpawnExits(Room room)
+        {
+            _exits.Clear();
+            foreach (var d in DungeonMap.AllDirs)
+            {
+                if ((room.Exits & d) == 0) continue;
+
+                Vector3 pos = d switch
+                {
+                    Dir.N => new Vector3(0f, 0f, arenaSize.y * 0.5f),
+                    Dir.S => new Vector3(0f, 0f, -arenaSize.y * 0.5f),
+                    Dir.E => new Vector3(arenaSize.x * 0.5f, 0f, 0f),
+                    _ => new Vector3(-arenaSize.x * 0.5f, 0f, 0f)
+                };
+
+                var go = Instantiate(exitPrefab, contentRoot.position + pos,
+                                     Quaternion.identity, contentRoot);
+                go.SetActive(true);
+                _spawned.Add(go);
+                _exits[d] = go;
+
+                var gate = go.GetComponent<ExitGate>();
+                if (gate == null) gate = go.AddComponent<ExitGate>();
+                gate.Setup(d, dir => ExitUsed?.Invoke(dir));
+            }
+        }
+
+        void OnEnemyDied(Health hp, GameObject go, bool elite)
+        {
+            _enemies.Remove(hp);
+            EnemyKilled?.Invoke(elite);
+
+            // 바로 끄면 죽는 모션이 안 보인다. 잠깐 남겨 두고 치운다.
+            // EnemyController는 이미 IsDead를 보고 멈추므로 시체가 움직이지는 않는다.
+            float linger = cfg != null ? cfg.corpseLinger : 2f;
+            if (linger > 0f && isActiveAndEnabled) StartCoroutine(HideLater(go, linger));
+            else go.SetActive(false);
+
+            if (_enemies.Count == 0 && !Cleared)
+            {
+                Cleared = true;
+                if (_room != null) _room.Cleared = true;
+                RefreshExits();
+                Clearedchanged?.Invoke();
+            }
+        }
+
+        System.Collections.IEnumerator HideLater(GameObject go, float seconds)
+        {
+            yield return new WaitForSeconds(seconds);
+            if (go != null) go.SetActive(false);
+        }
+
+        /// <summary>몬스터가 남아 있으면 출구가 잠긴다.</summary>
+        void RefreshExits()
+        {
+            foreach (var kv in _exits)
+            {
+                var gate = kv.Value.GetComponent<ExitGate>();
+                if (gate != null) gate.SetOpen(Cleared);
+            }
+        }
+
+        /// <summary>
+        /// 몬스터 자리를 고른다. 두 가지를 동시에 만족시켜야 한다.
+        ///   1. 입장 지점에서 충분히 떨어질 것 — 들어가자마자 맞으면 그건 사고다
+        ///   2. 서로 떨어질 것 — 뭉쳐 있으면 한 방에 다 맞고 플레이어도 한 방에 다 맞는다
+        /// 좁은 방에서는 둘 다 완벽히 만족할 수 없으므로, 후보를 여러 개 뽑아
+        /// 가장 나은 것을 고른다.
+        /// </summary>
+        Vector3 EnemySpawnPoint()
+        {
+            float safe = cfg != null ? cfg.enemySpawnSafeRadius : 5f;
+            float gap  = cfg != null ? cfg.enemySpawnSpacing : 3f;
+
+            Vector3 best = Vector3.zero;
+            float bestScore = float.MinValue;
+
+            for (int i = 0; i < 30; i++)
+            {
+                var c = RandomPoint(0.9f);
+
+                float dEntry = Vector3.Distance(c, _entry);
+                float dOther = _enemySpots.Count == 0 ? gap : float.MaxValue;
+                foreach (var s in _enemySpots)
+                    dOther = Mathf.Min(dOther, Vector3.Distance(c, s));
+
+                // 안전 거리와 간격은 "넘기면 그만"이므로 상한을 둔다.
+                // 안 그러면 전부 구석으로 몰린다.
+                float score = Mathf.Min(dEntry, safe) * 2f + Mathf.Min(dOther, gap);
+                if (score > bestScore) { bestScore = score; best = c; }
+            }
+
+            _enemySpots.Add(best);
+            return best;
+        }
+
+        Vector3 RandomPoint(float spread)
+        {
+            return contentRoot.position + new Vector3(
+                UnityEngine.Random.Range(-arenaSize.x, arenaSize.x) * 0.5f * spread,
+                0f,
+                UnityEngine.Random.Range(-arenaSize.y, arenaSize.y) * 0.5f * spread);
+        }
+
+        void ClearContents()
+        {
+            foreach (var go in _spawned) if (go != null) Destroy(go);
+            _spawned.Clear();
+            _enemySpots.Clear();
+            _enemies.Clear();
+            _exits.Clear();
+        }
+    }
+}

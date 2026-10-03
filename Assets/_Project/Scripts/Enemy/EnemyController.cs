@@ -200,6 +200,7 @@ namespace Proto.Enemy
             {
                 Proto.Feel.Feel.I.HitStop(1.5f);
                 Proto.Feel.Feel.I.Shake((_player.position - transform.position).normalized, 1.6f);
+                Proto.Feel.Haptics.Pulse(0.5f, 0.6f, 0.18f);
             }
         }
 

@@ -329,6 +329,7 @@ namespace Proto.Enemy
         void Shake(Vector3 dir, float scale)
         {
             if (Proto.Feel.Feel.I != null) Proto.Feel.Feel.I.Shake(dir, scale);
+            Proto.Feel.Haptics.Pulse(0.22f * scale, 0.32f * scale, 0.12f + 0.06f * scale);   // 보스 내려찍기 · 돌진 — 흔들림만큼
         }
 
         bool InRect(Vector3 origin, Vector3 fwd, float length, float width)

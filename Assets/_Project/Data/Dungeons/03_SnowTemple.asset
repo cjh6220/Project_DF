@@ -13,11 +13,13 @@ MonoBehaviour:
   m_Name: 03_SnowTemple
   m_EditorClassIdentifier: Assembly-CSharp::Proto.Data.DungeonDef
   id: snow
-  displayName: "\uC124\uC0B0 \uC0AC\uCC30"
-  subtitle: "\uB208 \uB36E\uC778 \uC0B0\uC0AC \xB7 \uC124\uC6D0\uC758 \uB9F9\uC218"
-  description: "\uB208\uBCF4\uB77C \uC18D\uC5D0 \uC7A0\uB4E0 \uC0AC\uCC30. \uAD76\uC8FC\uB9B0
-    \uB291\uB300 \uB5BC\uC640 \uC0B0\uC0AC\uC758 \uC218\uD638\uC790 \uBC31\uACF0\uC774
-    \uCE68\uC785\uC790\uB97C \uAE30\uB2E4\uB9B0\uB2E4."
+  displayName: "\uC124\uC0B0"
+  subtitle: "\uC5BC\uC5B4\uBD99\uC740 \uC0B0\uAE38 \xB7 \uB208\uBCF4\uB77C\uC758
+    \uC694\uAD34"
+  description: "\uB208\uBCF4\uB77C\uAC00 \uADF8\uCE58\uC9C0 \uC54A\uB294 \uD5D8\uD55C
+    \uC0B0\uAE38. \uC5BC\uC74C \uACE0\uBE14\uB9B0\uACFC \uC124\uB140\uAC00 \uAE38\uC744
+    \uB9C9\uACE0, \uC0B0\uC758 \uC8FC\uC778 \uC11C\uB9AC \uAC70\uC778\uC774 \uAE4A\uC740
+    \uACF3\uC5D0\uC11C \uAE30\uB2E4\uB9B0\uB2E4."
   theme: {fileID: 11400000, guid: 73e0ae6f0849a67419d028415a9f1bdc, type: 2}
   cardArt: {fileID: 2800000, guid: a0f9e82595ee16d42a3ab4e23fab8e8f, type: 3}
   portalColor: {r: 0.16, g: 0.48, b: 1, a: 1}

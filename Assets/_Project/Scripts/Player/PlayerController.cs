@@ -120,6 +120,7 @@ namespace Proto.Player
             }
 
             _moveInput = GameInput.MoveValue;
+            if (IsMining || _step > 0) { UpdateRun(); }
 
             if (IsMining) { TickMining(); return; }
 
@@ -132,12 +133,37 @@ namespace Proto.Player
             // Z(스킬)와 커맨드는 스킬 시스템에서 붙인다
         }
 
+        // ── 걷기 · 달리기 ──
+        // 좌우 방향키를 한 번 누르면 걷고, 짧은 사이에 두 번 누르면 달린다 (손을 떼거나 반대로 누르면 다시 걷기).
+        // 패드 스틱은 끝까지 빠르게 두 번 밀면 달린다.
+        const float DoubleTapWindow = 0.28f;
+        int _lastTapDir;          // -1 왼쪽 · +1 오른쪽
+        float _lastTapAt = -10f;
+        int _heldDir;
+        public bool IsRunning { get; private set; }
+
+        void UpdateRun()
+        {
+            int dir = _moveInput.x > 0.5f ? 1 : _moveInput.x < -0.5f ? -1 : 0;
+            if (dir != 0 && _heldDir != dir)
+            {
+                // 새로 눌렀다 — 같은 쪽을 방금 전에도 눌렀으면 달리기
+                float now = Time.unscaledTime;
+                IsRunning = dir == _lastTapDir && now - _lastTapAt <= DoubleTapWindow;
+                _lastTapDir = dir;
+                _lastTapAt = now;
+            }
+            if (dir == 0) IsRunning = false;
+            _heldDir = dir;
+        }
+
         void TickMove()
         {
+            UpdateRun();
             var dir = new Vector3(_moveInput.x, 0f, _moveInput.y);
             if (dir.sqrMagnitude > 1f) dir.Normalize();
 
-            _cc.SimpleMove(dir * cfg.moveSpeed);
+            _cc.SimpleMove(dir * (IsRunning ? cfg.moveSpeed : cfg.walkSpeed));
 
             // 좌우 방향만 바라본다 (벨트스크롤이므로 깊이 방향은 바라보지 않는다)
             if (Mathf.Abs(_moveInput.x) > 0.01f)
@@ -280,6 +306,7 @@ namespace Proto.Player
                 feel.HitStop(cfg.killHitStopScale);
                 feel.Shake(facing, 1.5f);
                 feel.KillSfx();
+                Proto.Feel.Haptics.Pulse(0.45f, 0.7f, 0.14f);   // 처치 · 마무리 — 묵직하게
             }
             else
             {
@@ -287,6 +314,7 @@ namespace Proto.Player
                 feel.HitStop(1f + 0.15f * Mathf.Min(connected - 1, 3));
                 feel.Shake(facing);
                 feel.HitSfx();
+                Proto.Feel.Haptics.Pulse(0.18f, 0.35f, 0.07f);  // 타격 — 짧고 가볍게
             }
         }
 
@@ -361,6 +389,7 @@ namespace Proto.Player
             {
                 Proto.Feel.Feel.I.Shake((transform.position - src).normalized, 0.7f);
                 Proto.Feel.Feel.I.Flash(visual != null ? visual : transform);
+                Proto.Feel.Haptics.Pulse(0.7f, 0.45f, 0.2f);   // 피격 — 둔하고 길게
                 Proto.Feel.Feel.I.Number(transform.position + Vector3.up * 2.1f, amount, Proto.Feel.Feel.NumberKind.Player);
             }
         }

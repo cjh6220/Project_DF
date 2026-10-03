@@ -56,6 +56,22 @@ namespace Proto.Core
         readonly System.Collections.Generic.HashSet<string> _cleared = new();
         public bool IsCleared(DungeonDef d) => d != null && _cleared.Contains(d.id);
         public event Action<DungeonDef> DungeonCleared;
+        public System.Collections.Generic.IEnumerable<string> ClearedIds => _cleared;
+
+        /// <summary>정산 화면의 "최고 기록" — 저장된다.</summary>
+        public int BestRooms { get; set; }
+
+        /// <summary>저장할 일이 생겼다 (자원 · 성장 · 스킬 · 클리어 · 행선지가 바뀜). 세이브가 듣는다.</summary>
+        public event Action SaveRequested;
+        public void RequestSave() => SaveRequested?.Invoke();
+
+        /// <summary>세이브에서 불러온 값을 넣는다. 게임 시작 때 한 번, 마을에 들어가기 전에.</summary>
+        public void ImportSave(System.Collections.Generic.List<string> cleared, int bestRooms)
+        {
+            _cleared.Clear();
+            if (cleared != null) foreach (var id in cleared) if (!string.IsNullOrEmpty(id)) _cleared.Add(id);
+            BestRooms = Mathf.Max(0, bestRooms);
+        }
 
         public event Action RunStarted;
         public event Action VillageEntered;
@@ -85,7 +101,12 @@ namespace Proto.Core
             room.BossKilled += OnBossKilled;
         }
 
-        void Start() => EnterVillage();
+        void Start()
+        {
+            // 세이브를 먼저 불러온 뒤 마을로 — 마을이 행선지 · 해금 상태를 칠할 때 이미 값이 들어 있어야 한다
+            SaveSystem.LoadInto(this, village);
+            EnterVillage();
+        }
 
         /// <summary>
         /// 마을로 간다. 게임 시작, 정산 뒤 [마을로], 던전 포기가 모두 여기로 온다.
@@ -108,6 +129,7 @@ namespace Proto.Core
             }
             player.ControlEnabled = true;
             VillageEntered?.Invoke();
+            RequestSave();
         }
 
         void Teleport(Vector3 pos)
@@ -133,6 +155,7 @@ namespace Proto.Core
             // 던전 겉모습을 먼저 바꾼다 — 마을을 숨길 때 하늘·안개를 이 테마로 다시 칠한다
             if (Dungeon != null && Dungeon.theme != null && room.Decorator != null)
                 room.Decorator.SetTheme(Dungeon.theme);
+            room.DungeonId = Dungeon != null ? Dungeon.id : "";
 
             if (village != null) village.Hide();
             room.SetVisible(true);
@@ -196,6 +219,15 @@ namespace Proto.Core
             // 몬스터 배치가 이 자리를 기준으로 결정되므로 반드시 Build보다 먼저 옮긴다.
             Teleport(room.EntryPointFor(_enteredFrom));
 
+            // 보스방으로 이어지는 출구 — 그 문만 검붉게 칠한다
+            Dir bossDirs = Dir.None;
+            foreach (var d in DungeonMap.AllDirs)
+            {
+                if ((r.Exits & d) == 0) continue;
+                var nb = Map.At(Map.CurrentCell + DungeonMap.Step(d));
+                if (nb != null && nb.Kind == RoomKind.Boss) bossDirs |= d;
+            }
+            room.BossDirs = bossDirs;
             room.Build(r, player.transform, _enteredFrom, _runSeed);
             MapChanged?.Invoke();
         }
@@ -255,6 +287,7 @@ namespace Proto.Core
             {
                 Proto.Feel.Feel.I.SlowMo(0.2f, 1.6f);
                 Proto.Feel.Feel.I.Shake(Vector3.up, 2f);
+                Proto.Feel.Haptics.Pulse(0.8f, 0.6f, 0.5f);   // 보스 처치
             }
             StartCoroutine(EndAfter(2.6f, "보스 처치"));
         }
@@ -276,6 +309,7 @@ namespace Proto.Core
             // 페널티 없음 — 획득물은 전부 유지한다
             RunLoot.MergeInto(Bank);
             RunEnded?.Invoke(reason);
+            RequestSave();
         }
 
         /// <summary>던전 포기 — 페널티 없이 지금까지 얻은 자원을 챙겨 나간다. 정산 없이 바로 마을로 간다.</summary>

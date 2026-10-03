@@ -1,0 +1,187 @@
+using UnityEngine;
+using UnityEngine.UI;
+using TMPro;
+using Proto.Core;
+
+namespace Proto.UI
+{
+    /// <summary>
+    /// 마을 메뉴 — 오른쪽 위 [메뉴] 버튼 또는 Esc.
+    ///
+    ///   [계속하기]     닫기
+    ///   [저장 초기화]  한 번 더 묻고 → 세이브를 지우고 처음부터
+    ///   [게임 종료]    저장하고 끈다
+    ///
+    /// 진행은 자동 저장되므로 "저장" 버튼은 따로 없다. 던전 안의 Esc는 포기 창(GiveUpMenu)이 쓴다.
+    /// </summary>
+    public class SystemMenu : MonoBehaviour
+    {
+        [SerializeField] RunManager run;
+        [SerializeField] Proto.Town.VillageController village;
+
+        public static bool IsOpen { get; private set; }
+
+        RectTransform _root, _main, _confirm, _button;
+        Button _continue, _cancel;
+        TextMeshProUGUI _buttonLabel, _saveInfo;
+        bool _uiWasOpen;   // 지난 프레임에 다른 창이 열려 있었나 — 그 창을 닫은 Esc로 메뉴가 같이 열리지 않게
+
+        void Awake()
+        {
+            IsOpen = false;
+            Build();
+            _root.gameObject.SetActive(false);
+        }
+
+        void Start()
+        {
+            run.RunStarted += () => { Close(); _button.gameObject.SetActive(false); };
+            run.VillageEntered += () => _button.gameObject.SetActive(true);
+            _button.gameObject.SetActive(run.Phase == RunPhase.Village);
+        }
+
+        void OnDestroy() => IsOpen = false;
+
+        void Build()
+        {
+            var btn = UiKit.Button(transform, "MenuButton", "메뉴 (Esc)", new Vector2(150f, 38f), 18);
+            _button = (RectTransform)btn.transform;
+            _button.anchorMin = _button.anchorMax = new Vector2(1f, 1f);
+            _button.pivot = new Vector2(1f, 1f);
+            _button.anchoredPosition = new Vector2(-40f, -40f);
+            btn.onClick.AddListener(Open);
+            _buttonLabel = btn.GetComponentInChildren<TextMeshProUGUI>();
+
+            _root = UiKit.Stretch(UiKit.Rect(transform, "SystemMenu"));
+            var dim = UiKit.Image(_root, "Dim", new Color(0f, 0f, 0f, 0.6f), null, true);
+            UiKit.Stretch(dim.rectTransform);
+
+            // ── 메뉴 ──
+            var main = UiKit.Image(_root, "Main", new Color(0.10f, 0.09f, 0.13f, 0.97f));
+            _main = main.rectTransform;
+            UiKit.Place(_main, new Vector2(0.5f, 0.5f), Vector2.zero, new Vector2(460f, 400f));
+            UiKit.Frame(_main, 0.6f, 0f, UiKit.FrameKind.Dialog);
+
+            var title = UiKit.Text(_main, "Title", "메뉴", 34);
+            UiKit.Place(title.rectTransform, new Vector2(0.5f, 1f), new Vector2(0f, -48f), new Vector2(420f, 44f));
+            title.fontStyle = FontStyles.Bold;
+
+            _continue = MenuButton(_main, "Continue", "계속하기", -120f, UiKit.ButtonKind.Primary, Close);
+            MenuButton(_main, "Reset", "저장 초기화", -190f, UiKit.ButtonKind.Danger, ShowConfirm);
+            MenuButton(_main, "Quit", "게임 종료", -260f, UiKit.ButtonKind.Secondary, Quit);
+
+            _saveInfo = UiKit.Text(_main, "SaveInfo", "", 17);
+            UiKit.Place(_saveInfo.rectTransform, new Vector2(0.5f, 0f), new Vector2(0f, 34f), new Vector2(420f, 24f));
+            _saveInfo.color = new Color(1f, 1f, 1f, 0.5f);
+
+            // ── 초기화 확인 ──
+            var conf = UiKit.Image(_root, "Confirm", new Color(0.10f, 0.09f, 0.13f, 0.97f));
+            _confirm = conf.rectTransform;
+            UiKit.Place(_confirm, new Vector2(0.5f, 0.5f), Vector2.zero, new Vector2(600f, 280f));
+            UiKit.Frame(_confirm, 0.6f, 0f, UiKit.FrameKind.Dialog);
+
+            var ct = UiKit.Text(_confirm, "Title", "저장을 초기화할까요?", 32);
+            UiKit.Place(ct.rectTransform, new Vector2(0.5f, 1f), new Vector2(0f, -50f), new Vector2(560f, 44f));
+            ct.fontStyle = FontStyles.Bold;
+            var cb = UiKit.Text(_confirm, "Body", "자원 · 성장 · 스킬 · 클리어 기록이 모두 지워지고\n처음부터 다시 시작합니다. 되돌릴 수 없습니다.", 21);
+            UiKit.Place(cb.rectTransform, new Vector2(0.5f, 1f), new Vector2(0f, -118f), new Vector2(560f, 64f));
+            cb.color = new Color(1f, 1f, 1f, 0.75f);
+
+            var yes = UiKit.Button(_confirm, "Yes", "초기화", new Vector2(240f, 54f), 21);
+            UiKit.Style(yes, UiKit.ButtonKind.Danger);
+            ((RectTransform)yes.transform).anchorMin = ((RectTransform)yes.transform).anchorMax = new Vector2(0.5f, 0f);
+            ((RectTransform)yes.transform).anchoredPosition = new Vector2(-128f, 50f);
+            yes.onClick.AddListener(SaveSystem.ResetAndRestart);
+
+            var no = UiKit.Button(_confirm, "No", "취소", new Vector2(240f, 54f), 21);
+            ((RectTransform)no.transform).anchorMin = ((RectTransform)no.transform).anchorMax = new Vector2(0.5f, 0f);
+            ((RectTransform)no.transform).anchoredPosition = new Vector2(128f, 50f);
+            no.onClick.AddListener(ShowMain);
+            _cancel = no;
+        }
+
+        Button MenuButton(RectTransform parent, string name, string label, float y, UiKit.ButtonKind kind, UnityEngine.Events.UnityAction onClick)
+        {
+            var b = UiKit.Button(parent, name, label, new Vector2(300f, 54f), 21);
+            UiKit.Style(b, kind);
+            var rt = (RectTransform)b.transform;
+            rt.anchorMin = rt.anchorMax = new Vector2(0.5f, 1f);
+            rt.anchoredPosition = new Vector2(0f, y);
+            b.onClick.AddListener(onClick);
+            return b;
+        }
+
+        void Update()
+        {
+            if (run == null || run.Phase != RunPhase.Village) { _uiWasOpen = false; return; }
+            bool otherUi = village != null && village.AnyUiOpen && !IsOpen;
+
+            if (IsOpen)
+            {
+                if (GameInput.MenuPressed || GameInput.CancelPressed)
+                {
+                    if (_confirm.gameObject.activeSelf) ShowMain(); else Close();
+                }
+            }
+            else if (GameInput.MenuPressed && !otherUi && !_uiWasOpen)
+            {
+                Open();
+            }
+            _uiWasOpen = otherUi;
+            InputFx.Set(_buttonLabel, $"메뉴 ({InputGlyphs.Of(Act.Menu)})");
+        }
+
+        void Open()
+        {
+            if (run.Phase != RunPhase.Village || IsOpen) return;
+            if (village != null && village.AnyUiOpen) return;
+            IsOpen = true;
+            _root.gameObject.SetActive(true);
+            transform.SetAsLastSibling();
+            _saveInfo.text = SaveSystem.HasSave ? "진행 상황은 자동으로 저장됩니다" : "아직 저장된 진행이 없습니다";
+            ShowMain();
+            Time.timeScale = 0f;
+        }
+
+        void Close()
+        {
+            if (!IsOpen) return;
+            IsOpen = false;
+            _root.gameObject.SetActive(false);
+            Select(null);
+            Time.timeScale = 1f;
+        }
+
+        void ShowMain()
+        {
+            _main.gameObject.SetActive(true);
+            _confirm.gameObject.SetActive(false);
+            Select(_continue.gameObject);
+        }
+
+        void ShowConfirm()
+        {
+            _main.gameObject.SetActive(false);
+            _confirm.gameObject.SetActive(true);
+            Select(_cancel.gameObject);   // 패드는 [취소]에 커서 — 실수로 지우지 않게
+        }
+
+        static void Select(GameObject go)
+        {
+            if (UnityEngine.EventSystems.EventSystem.current != null)
+                UnityEngine.EventSystems.EventSystem.current.SetSelectedGameObject(go);
+        }
+
+        void Quit()
+        {
+            var agent = run.GetComponent<SaveAgent>();
+            if (agent != null) agent.SaveNow();
+            Time.timeScale = 1f;
+#if UNITY_EDITOR
+            UnityEditor.EditorApplication.isPlaying = false;
+#else
+            Application.Quit();
+#endif
+        }
+    }
+}

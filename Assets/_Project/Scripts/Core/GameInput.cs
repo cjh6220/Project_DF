@@ -181,11 +181,101 @@ namespace Proto.Core
             else if (device is Keyboard || device is Mouse) { s = InputScheme.Keyboard; name = "키보드"; }
             else return;
 
-            if (s == Scheme) return;
+            if (SchemeLocked || s == Scheme) return;
             Scheme = s;
             DeviceName = name;
             SchemeChanged?.Invoke();
         }
+
+        // ───────────────────────────── 설정: 버튼 표시 고정 ─────────────────────────────
+
+        /// <summary>설정에서 버튼 표시를 고정했으면 장치를 바꿔 눌러도 표시가 바뀌지 않는다.</summary>
+        public static bool SchemeLocked { get; private set; }
+        public static void LockScheme(InputScheme s) { SchemeLocked = false; ForceScheme(s); SchemeLocked = true; }
+        public static void UnlockScheme() => SchemeLocked = false;
+
+        // ───────────────────────────── 설정: 키 재설정 (키보드) ─────────────────────────────
+
+        public struct Rebindable
+        {
+            public string Label;
+            public InputAction Action;
+            public int Index;   // 액션 안의 키보드 바인딩 번호
+        }
+
+        /// <summary>설정 창에 나오는 바꿀 수 있는 키. Esc(닫기·메뉴)는 고정이다.</summary>
+        public static Rebindable[] Rebindables()
+        {
+            Ensure();
+            return new[]
+            {
+                new Rebindable { Label = "위",        Action = Move, Index = 1 },
+                new Rebindable { Label = "아래",      Action = Move, Index = 2 },
+                new Rebindable { Label = "왼쪽",      Action = Move, Index = 3 },
+                new Rebindable { Label = "오른쪽",    Action = Move, Index = 4 },
+                new Rebindable { Label = "공격",      Action = Attack, Index = 0 },
+                new Rebindable { Label = "스킬",      Action = Skill, Index = 0 },
+                new Rebindable { Label = "채굴",      Action = Mine, Index = 0 },
+                new Rebindable { Label = "대화 · 결정", Action = Interact, Index = 0 },
+                new Rebindable { Label = "퀵슬롯 1",  Action = _slotKeys[0], Index = 0 },
+                new Rebindable { Label = "퀵슬롯 2",  Action = _slotKeys[1], Index = 0 },
+                new Rebindable { Label = "퀵슬롯 3",  Action = _slotKeys[2], Index = 0 },
+                new Rebindable { Label = "퀵슬롯 4",  Action = _slotKeys[3], Index = 0 },
+            };
+        }
+
+        /// <summary>키 이름 — "X", "Space" 처럼 사람이 읽는 글자.</summary>
+        public static string KeyLabel(InputAction a, int index)
+        {
+            if (a == null || index < 0 || index >= a.bindings.Count) return "?";
+            var path = a.bindings[index].effectivePath;
+            var s = InputControlPath.ToHumanReadableString(path, InputControlPath.HumanReadableStringOptions.OmitDevice);
+            if (string.IsNullOrEmpty(s)) return "?";
+            switch (s)
+            {
+                case "Up Arrow": return "↑";
+                case "Down Arrow": return "↓";
+                case "Left Arrow": return "←";
+                case "Right Arrow": return "→";
+                case "Left Shift": return "L Shift";
+                case "Right Shift": return "R Shift";
+                case "Left Control": return "L Ctrl";
+                case "Right Control": return "R Ctrl";
+                default: return s;
+            }
+        }
+
+        public static void ExportOverrides(System.Collections.Generic.List<string> actions, System.Collections.Generic.List<int> indices,
+                                           System.Collections.Generic.List<string> paths)
+        {
+            Ensure();
+            foreach (var a in All())
+                for (int i = 0; i < a.bindings.Count; i++)
+                    if (!string.IsNullOrEmpty(a.bindings[i].overridePath)) { actions.Add(a.name); indices.Add(i); paths.Add(a.bindings[i].overridePath); }
+        }
+
+        public static void ApplyOverrides(System.Collections.Generic.List<string> actions, System.Collections.Generic.List<int> indices,
+                                          System.Collections.Generic.List<string> paths)
+        {
+            Ensure();
+            ClearOverrides();
+            if (actions == null || indices == null || paths == null) return;
+            for (int k = 0; k < actions.Count && k < indices.Count && k < paths.Count; k++)
+                foreach (var a in All())
+                    if (a.name == actions[k] && indices[k] >= 0 && indices[k] < a.bindings.Count)
+                        a.ApplyBindingOverride(indices[k], paths[k]);
+            SchemeChanged?.Invoke();   // 키 표시를 다시 그리게
+        }
+
+        public static void ClearOverrides()
+        {
+            Ensure();
+            foreach (var a in All()) a.RemoveAllBindingOverrides();
+            SchemeChanged?.Invoke();
+        }
+
+        /// <summary>키 표시를 다시 그리게 알린다 (키를 바꾼 직후).</summary>
+        public static void NotifyBindingsChanged() => SchemeChanged?.Invoke();
 
         /// <summary>테스트용 — 패드 없이 버튼 표시를 확인한다.</summary>
         public static void ForceScheme(InputScheme s)

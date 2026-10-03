@@ -29,8 +29,8 @@ namespace Proto.Core
     {
         public const int SlotCount = 4;
 
-        /// <summary>테스트용 시작 SP. 수련 노드가 생기면 0으로 내린다.</summary>
-        public const int StartingSp = 6;
+        /// <summary>시작 SP — 없다. SP는 던전 보스를 처음 잡을 때 얻는다.</summary>
+        public const int StartingSp = 0;
 
         public static readonly SkillDef[] All =
         {
@@ -132,6 +132,37 @@ namespace Proto.Core
         {
             if (_slots[slot] < 0) return;
             _slots[slot] = -1;
+            Changed?.Invoke();
+        }
+
+        // ── 저장 ──
+        /// <summary>스킬은 이름으로 저장한다 — 목록 순서가 바뀌어도 맞는 스킬에 들어간다.</summary>
+        public void Export(System.Collections.Generic.List<string> names, System.Collections.Generic.List<int> levels,
+                           System.Collections.Generic.List<string> slots, out int sp)
+        {
+            for (int i = 0; i < All.Length; i++) if (_levels[i] > 0) { names.Add(All[i].Name); levels.Add(_levels[i]); }
+            for (int s = 0; s < SlotCount; s++) slots.Add(_slots[s] >= 0 ? All[_slots[s]].Name : "");
+            sp = Sp;
+        }
+
+        public void Import(System.Collections.Generic.List<string> names, System.Collections.Generic.List<int> levels,
+                           System.Collections.Generic.List<string> slots, int sp)
+        {
+            for (int i = 0; i < All.Length; i++) _levels[i] = All[i].Tier == 0 ? 1 : 0;   // 시작 스킬은 언제나 배운 상태
+            if (names != null && levels != null)
+                for (int k = 0; k < names.Count && k < levels.Count; k++)
+                {
+                    int i = Array.FindIndex(All, d => d.Name == names[k]);
+                    if (i >= 0) _levels[i] = Math.Max(_levels[i], Math.Min(levels[k], All[i].MaxLevel));
+                }
+            for (int s = 0; s < SlotCount; s++)
+            {
+                _slots[s] = -1;
+                if (slots == null || s >= slots.Count || string.IsNullOrEmpty(slots[s])) continue;
+                int i = Array.FindIndex(All, d => d.Name == slots[s]);
+                if (i >= 0 && _levels[i] > 0 && Array.IndexOf(_slots, i) < 0) _slots[s] = i;
+            }
+            Sp = Math.Max(0, sp);
             Changed?.Invoke();
         }
 

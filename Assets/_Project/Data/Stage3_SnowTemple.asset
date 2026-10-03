@@ -26,6 +26,7 @@ MonoBehaviour:
   backdrop: {fileID: 2800000, guid: 8381df648d1ce3547809eee93840c309, type: 3}
   backdropShift: 0.15
   backdropHaze: 0.25
+  backdropDepth: 31
   sunColor: {r: 0.95, g: 0.97, b: 1, a: 1}
   borderTrees:
   - {fileID: 8521408192733139688, guid: 43360905efbff2b4bbb83aa0db269dfd, type: 3}
@@ -69,17 +70,20 @@ MonoBehaviour:
   lowBorderScale: {x: 0.7, y: 1.2}
   sideBorderOutset: 4
   enemyModels:
-  - {fileID: 1555847620765010, guid: 1159fbfcf2d66ee4b896abb3e41d47c4, type: 3}
-  - {fileID: 7359655724910758988, guid: a838ec8ea7d24c544b5e48e5aba36cdc, type: 3}
-  - {fileID: 391536099558741291, guid: 762b5bfe811b776459417e9e29cbab94, type: 3}
-  - {fileID: 1555847620765010, guid: 1159fbfcf2d66ee4b896abb3e41d47c4, type: 3}
+  - {fileID: 6002298291447900735, guid: 930650503ad92e443b084a32206cef57, type: 3}
+  - {fileID: 6002298291447900735, guid: 930650503ad92e443b084a32206cef57, type: 3}
+  - {fileID: 6499035803617752170, guid: a6762052c49dde04db75e1027a54f97c, type: 3}
+  - {fileID: 381049327281158277, guid: 0fde8ea6f1b15e945b23258f56a2658b, type: 3}
+  - {fileID: 1449424507095405219, guid: d5cb940a4874ef94a96fa676a435ea98, type: 3}
   championModels:
-  - {fileID: 1555847620765010, guid: 54f08473df2a94348a95272458da3885, type: 3}
-  - {fileID: 1390276149824892, guid: c5e7161780bfc06459e1d0fd1cefd777, type: 3}
-  bossModel: {fileID: 1390276149824892, guid: 6ee0769bd911abd4aad799c0b81cab00, type: 3}
-  bossScale: 2
-  bossName: "\uBC31\uACF0 \uC124\uC57C"
-  bossTitle: "\uC0B0\uC0AC\uC758 \uC218\uD638\uC790"
+  - {fileID: 5762349524370615704, guid: f7bb557e196963048b4852d394988aa4, type: 3}
+  - {fileID: 4151621184327224356, guid: cf8fc37d69fe71d4eaa6220e3a53041d, type: 3}
+  bossModel: {fileID: 1766703134789134716, guid: 5d90b9938f652564bbb2a026a05d5d14, type: 3}
+  bossScale: 1.75
+  bossName: "\uC11C\uB9AC \uAC70\uC778"
+  bossTitle: "\uC124\uC0B0\uC758 \uC655"
+  doorModel: {fileID: 919132149155446097, guid: e2c17f317402aaa459b19c40a7e73c56, type: 3}
+  doorHeight: 3.6
   obstacles:
   - {fileID: 4169096484274329770, guid: 3f12c5aeffadbfb48a73664c32368166, type: 3}
   - {fileID: 4416698844278078833, guid: 4d00dbc1ac9ef304aa979e15efe8d2b6, type: 3}
@@ -88,6 +92,13 @@ MonoBehaviour:
   - {fileID: 1481561816959580188, guid: 3efe9cf3044a4124c85a74c7bc17d893, type: 3}
   - {fileID: 7957923197996204286, guid: 23bf4b1cdde4b2b42b9ab9bca9fb4d51, type: 3}
   - {fileID: 1000010162874410, guid: 896b9aac1f0db4cc99919922db51bcff, type: 3}
+  bigObstacles:
+  - {fileID: 1600809451893531828, guid: 0604ce9b58da7114aa77bfa1ef820aea, type: 3}
+  - {fileID: 7658682399492481851, guid: 850cf371227ecdb4c8a21a7e92436546, type: 3}
+  - {fileID: 4335345327989423534, guid: e8d5ba405fa890047bbf6afded7c1441, type: 3}
+  - {fileID: 4309250480460552501, guid: 0972e91d6aa6fcb409e1fc902a432de4, type: 3}
+  - {fileID: 1000011506362536, guid: 9427ec3486e894940ae4503059700080, type: 3}
+  bigObstacleSize: 3
   obstacleCount: {x: 1, y: 3}
   obstacleScale: {x: 0.7, y: 1.2}
   obstacleClearFromEntry: 4.5

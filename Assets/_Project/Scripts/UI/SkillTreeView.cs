@@ -64,6 +64,8 @@ namespace Proto.UI
         }
 
         RectTransform _root, _content, _edges, _nodes, _tooltip, _preview;
+        Image _select;          // 고른 노드에 걸리는 금색 모서리 괄호 (Resources/UI/SelectBrackets)
+        float _selectT;
         TextMeshProUGUI _tipCat, _tipName, _tipBody, _tipCost, _tipStatus, _previewLabel;
         Image _tipCostIcon, _tipArrow;
         RectTransform _tipCostRow, _tipDiv2;
@@ -158,7 +160,7 @@ namespace Proto.UI
             core.Core = true;
             core.Icon.text = "시작";
             SetArt(core, "explore_start");
-            core.Ring.color = ColGoldHot;
+            PaintFrame(core, Color.white, true);
             core.Glow.color = new Color(1f, 0.65f, 0.25f, 0.35f);
 
             foreach (var n in Progression.Nodes)
@@ -192,14 +194,18 @@ namespace Proto.UI
             v.Glow = UiKit.Image(v.Root, "Glow", new Color(1f, 0.6f, 0.2f, 0f), UiKit.Soft);
             UiKit.Place(v.Glow.rectTransform, new Vector2(0.5f, 0.5f), Vector2.zero, Vector2.one * size * 1.9f);
 
-            // 바깥 금속 링
-            v.Ring = UiKit.Image(v.Root, "Ring", ColSteel, UiArt.MetalDisc);
+            // 테두리 — 둥근 사각 가는 선 (Resources/UI/TreeNode · 습득하면 TreeNodeSel)
+            var frameSpr = UiKit.Ui("TreeNode");
+            v.Ring = UiKit.Image(v.Root, "Ring", ColSteel, frameSpr != null ? frameSpr : UiArt.MetalDisc);
             UiKit.Stretch(v.Ring.rectTransform);
+            if (frameSpr != null) { v.Ring.type = Image.Type.Sliced; v.Ring.pixelsPerUnitMultiplier = 160f / size; }
 
-            // 안쪽 어두운 판 + 아이콘 (원 안으로만 보이게 마스크)
-            v.Inner = UiKit.Image(v.Root, "Inner", ColInner, UiArt.Disc, true);
+            // 안쪽 어두운 판 + 아이콘 (판 안으로만 보이게 마스크)
+            v.Inner = UiKit.Image(v.Root, "Inner", ColInner, frameSpr != null ? UiArt.RoundRectFill : UiArt.Disc, true);
+            if (frameSpr != null) v.Inner.type = Image.Type.Sliced;
             UiKit.Stretch(v.Inner.rectTransform);
-            float inset = size * 0.075f;
+            v.Ring.transform.SetSiblingIndex(v.Inner.transform.GetSiblingIndex());   // 테두리를 판 위에
+            float inset = size * (frameSpr != null ? 0.06f : 0.075f);
             v.Inner.rectTransform.offsetMin = new Vector2(inset, inset);
             v.Inner.rectTransform.offsetMax = new Vector2(-inset, -inset);
             v.Inner.gameObject.AddComponent<Mask>().showMaskGraphic = true;
@@ -253,9 +259,22 @@ namespace Proto.UI
             v.Icon.gameObject.SetActive(false);
         }
 
+        static Sprite _frame, _frameSel, _line;
+
+        /// <summary>테두리 색 — 습득한 노드는 금빛 테두리 그림으로 바꾼다.</summary>
+        static void PaintFrame(NodeView v, Color c, bool owned)
+        {
+            if (_frame == null) { _frame = UiKit.Ui("TreeNode"); _frameSel = UiKit.Ui("TreeNodeSel"); }
+            if (_frame == null) { v.Ring.color = c; return; }
+            v.Ring.sprite = owned && _frameSel != null ? _frameSel : _frame;
+            v.Ring.color = c;
+        }
+
         static Image Edge(Transform parent, Vector2 a, Vector2 b, float width)
         {
-            var img = UiKit.Image(parent, "Edge", ColEdgeOff);
+            if (_line == null) _line = UiKit.Ui("TreeLine");
+            var img = UiKit.Image(parent, "Edge", ColEdgeOff, _line);
+            if (_line != null) { img.type = Image.Type.Sliced; width *= 1.4f; }
             var rt = img.rectTransform;
             Vector2 d = b - a;
             UiKit.Place(rt, new Vector2(0.5f, 0.5f), (a + b) * 0.5f, new Vector2(d.magnitude, width));
@@ -265,7 +284,7 @@ namespace Proto.UI
 
         void BuildHeader()
         {
-            var title = UiKit.Text(_root, "Title", "스킬 트리", 46, TextAlignmentOptions.Left);
+            var title = UiKit.Text(_root, "Title", "성장", 46, TextAlignmentOptions.Left);
             Corner(title.rectTransform, new Vector2(0f, 1f), new Vector2(44f, -22f), new Vector2(600f, 60f));
             title.fontStyle = FontStyles.Bold;
 
@@ -445,7 +464,7 @@ namespace Proto.UI
                 bool afford = prog.CanBuy(n, run.Bank);
 
                 v.Lock.SetActive(!unlocked);
-                v.Ring.color = !unlocked ? ColSteel : afford ? ColGoldHot : lv > 0 ? ColGold : ColGoldDim;
+                PaintFrame(v, !unlocked ? ColSteel : afford ? ColGoldHot : lv > 0 ? Color.white : new Color(0.86f, 0.86f, 0.90f, 1f), lv > 0);
                 v.Art.color = !unlocked ? new Color(0.36f, 0.34f, 0.42f, 1f)
                             : (lv > 0 || afford) ? Color.white : new Color(0.78f, 0.78f, 0.80f, 1f);
                 v.Icon.color = unlocked ? Color.white : new Color(1f, 1f, 1f, 0.3f);
@@ -475,6 +494,39 @@ namespace Proto.UI
                 g.a = run.Progression.CanBuy(v.Data, run.Bank) ? pulse : 0f;
                 v.Glow.color = g;
             }
+            PaintSelect();
+        }
+
+        /// <summary>지금 고른 노드에 모서리 괄호를 건다 — 패드로 옮겨 다닐 때 어디 있는지 보인다.</summary>
+        void PaintSelect()
+        {
+            if (_select == null)
+            {
+                var spr = UiKit.Ui("SelectBrackets");
+                if (spr == null) return;
+                _select = UiKit.Image(_nodes, "Select", Color.white, spr);
+                _select.type = Image.Type.Sliced;
+                _select.gameObject.SetActive(false);
+            }
+            bool on = _hover != null && _hover.Root.gameObject.activeInHierarchy;
+            if (_select.gameObject.activeSelf != on) _select.gameObject.SetActive(on);
+            if (!on) return;
+            var rt = _select.rectTransform;
+            if (rt.parent != _hover.Root)
+            {
+                rt.SetParent(_hover.Root, false);
+                rt.SetAsLastSibling();
+                UiKit.Stretch(rt);
+                _selectT = 0f;
+            }
+            float size = _hover.Root.sizeDelta.x;
+            _select.pixelsPerUnitMultiplier = 140f / size;
+            _selectT = Mathf.Min(1f, _selectT + Time.unscaledDeltaTime * 7f);
+            float pop = Mathf.Lerp(0.35f, 0.16f, 1f - Mathf.Pow(1f - _selectT, 3f));   // 넓게 잡았다가 조여 든다
+            float breathe = 0.02f * Mathf.Sin(Time.unscaledTime * 5f);
+            float pad = size * (pop + breathe);
+            rt.offsetMin = new Vector2(-pad, -pad);
+            rt.offsetMax = new Vector2(pad, pad);
         }
 
         // ───────────────────────────── 패드 · 방향키 ─────────────────────────────

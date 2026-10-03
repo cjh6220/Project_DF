@@ -24,6 +24,8 @@ namespace Proto.UI
         Button _no;
         TextMeshProUGUI _buttonLabel;
         bool _open;
+        /// <summary>포기 창이 떠 있나 (진동 · 다른 창이 본다).</summary>
+        public static bool IsOpen { get; private set; }
 
         void Awake()
         {
@@ -56,7 +58,7 @@ namespace Proto.UI
             UiKit.Stretch(dim.rectTransform);
 
             var panel = UiKit.Image(_root, "Panel", new Color(0.10f, 0.09f, 0.13f, 0.97f));
-            UiKit.Place(panel.rectTransform, new Vector2(0.5f, 0.5f), Vector2.zero, new Vector2(560f, 250f));
+            UiKit.Place(panel.rectTransform, new Vector2(0.5f, 0.5f), Vector2.zero, new Vector2(560f, 310f));
             UiKit.Frame(panel.rectTransform, 0.6f, 0f, UiKit.FrameKind.Dialog);
 
             var title = UiKit.Text(panel.transform, "Title", "던전을 포기할까요?", 34);
@@ -70,20 +72,33 @@ namespace Proto.UI
             var yes = UiKit.Button(panel.transform, "Yes", "포기하고 마을로", new Vector2(240f, 54f), 21);
             UiKit.Style(yes, UiKit.ButtonKind.Danger);
             ((RectTransform)yes.transform).anchorMin = ((RectTransform)yes.transform).anchorMax = new Vector2(0.5f, 0f);
-            ((RectTransform)yes.transform).anchoredPosition = new Vector2(-128f, 50f);
+            ((RectTransform)yes.transform).anchoredPosition = new Vector2(-128f, 96f);
             yes.image.color = new Color(0.85f, 0.35f, 0.28f, 1f);
             yes.onClick.AddListener(GiveUp);
 
             var no = UiKit.Button(panel.transform, "No", "계속하기", new Vector2(240f, 54f), 21);
             ((RectTransform)no.transform).anchorMin = ((RectTransform)no.transform).anchorMax = new Vector2(0.5f, 0f);
-            ((RectTransform)no.transform).anchoredPosition = new Vector2(128f, 50f);
+            ((RectTransform)no.transform).anchoredPosition = new Vector2(128f, 96f);
             no.onClick.AddListener(Close);
             _no = no;
+
+            // 설정 — 던전 안에서도 흔들림 · 볼륨을 바로 바꿀 수 있게
+            var set = UiKit.Button(panel.transform, "Settings", "설정", new Vector2(160f, 40f), 18);
+            ((RectTransform)set.transform).anchorMin = ((RectTransform)set.transform).anchorMax = new Vector2(0.5f, 0f);
+            ((RectTransform)set.transform).anchoredPosition = new Vector2(0f, 38f);
+            set.onClick.AddListener(() => { var sv = GetComponent<SettingsView>(); if (sv != null) sv.Open(); });
+        }
+
+        /// <summary>창이 비활성이 되면(설정: 자동 일시정지) 이 창을 띄워 멈춘다.</summary>
+        public void PauseFromFocusLoss()
+        {
+            if (run != null && run.Phase == RunPhase.InDungeon && !_open && Time.timeScale > 0f) Open();
         }
 
         void Update()
         {
             if (run == null || run.Phase != RunPhase.InDungeon) return;
+            if (SettingsView.IsOpen || SettingsView.ClosedFrame == Time.frameCount) return;   // 설정 창이 Esc를 쓴다
             // Esc / OPTIONS 로 열고 닫는다. 열려 있으면 ○ 로도 닫는다.
             if (GameInput.MenuPressed || (_open && GameInput.CancelPressed))
             {
@@ -96,6 +111,7 @@ namespace Proto.UI
         {
             if (run.Phase != RunPhase.InDungeon) return;
             _open = true;
+            IsOpen = true;
             _root.gameObject.SetActive(true);
             transform.SetAsLastSibling();
             Time.timeScale = 0f;   // 확인 창이 떠 있는 동안 피로도·몬스터가 멈춘다
@@ -108,6 +124,7 @@ namespace Proto.UI
         {
             if (!_open) return;
             _open = false;
+            IsOpen = false;
             _root.gameObject.SetActive(false);
             if (UnityEngine.EventSystems.EventSystem.current != null)
                 UnityEngine.EventSystems.EventSystem.current.SetSelectedGameObject(null);

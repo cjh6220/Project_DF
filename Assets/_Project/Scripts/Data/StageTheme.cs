@@ -120,9 +120,19 @@ namespace Proto.Data
         public string bossName = "실버백";
         public string bossTitle = "숲의 주인";
 
+        [Header("── 출구 문 ──")]
+        [Tooltip("방과 방을 잇는 문 모델. 비워 두면 마을 도리이를 쓴다. 보스방으로 가는 문은 같은 모델을 검붉게 칠한다")]
+        public GameObject doorModel;
+        [Tooltip("문 높이 (m)")]
+        public float doorHeight = 3.6f;
+
         [Header("── 방 안: 지형물 ──")]
         [Tooltip("바위·그루터기·쓰러진 나무. 시선을 끊는 역할이라 크게.")]
         public GameObject[] obstacles;
+
+        [Tooltip("방 배치(RoomLayout)의 큰 장애물 자리에 놓는 것 — 바위 · 비석처럼 키가 있고 길을 막는 것.\n크기는 모델마다 달라도 bigObstacleSize(m) 폭으로 맞춰 놓는다.")]
+        public GameObject[] bigObstacles;
+        public float bigObstacleSize = 2.2f;
         public Vector2Int obstacleCount = new Vector2Int(2, 5);
         public Vector2 obstacleScale = new Vector2(0.6f, 1.1f);
         [Tooltip("입장 지점에서 이만큼 안에는 놓지 않는다")]

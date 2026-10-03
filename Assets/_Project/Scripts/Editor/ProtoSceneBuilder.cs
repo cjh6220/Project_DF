@@ -598,6 +598,11 @@ namespace Proto.EditorTools
 
             var giveUp = FullScreen(canvasGo.transform, "GiveUp").AddComponent<GiveUpMenu>();
             Set(giveUp, "run", run);
+            // 마을 메뉴 (Esc) — 저장 초기화 · 게임 종료. 포기 창과 같은 자리에 붙는다
+            var sysMenu = giveUp.gameObject.AddComponent<SystemMenu>(); giveUp.gameObject.AddComponent<SettingsView>();   // 설정 창 — 메뉴 · 포기 창이 같이 쓴다
+            Set(sysMenu, "run", run);
+            var villageForMenu = Object.FindFirstObjectByType<Proto.Town.VillageController>(FindObjectsInactive.Include);
+            if (villageForMenu != null) Set(sysMenu, "village", villageForMenu);
 
             var tree = FullScreen(canvasGo.transform, "SkillTree").AddComponent<SkillTreeView>();
             Set(tree, "run", run);
@@ -608,6 +613,9 @@ namespace Proto.EditorTools
             var result = FullScreen(canvasGo.transform, "Result").AddComponent<ResultView>();
             Set(result, "run", run);
             Set(result, "tree", tree);
+
+            // 새 UI 그림(막대 테두리·미니맵·획득물 띠)을 HUD에 바로 굽는다
+            HudSkin.Apply(canvasGo.transform);
 
             var iris = FullScreen(canvasGo.transform, "IrisTransition").AddComponent<IrisTransition>();
             Set(iris, "irisMaterial", AssetDatabase.LoadAssetAtPath<Material>("Assets/_Project/Materials/UIIris.mat"));
