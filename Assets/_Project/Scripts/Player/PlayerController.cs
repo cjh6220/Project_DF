@@ -3,7 +3,6 @@ using UnityEngine;
 using UnityEngine.InputSystem;
 using Proto.Core;
 using Proto.Data;
-using Proto.Mining;
 
 namespace Proto.Player
 {
@@ -25,6 +24,12 @@ namespace Proto.Player
 
         CharacterController _cc;
         Health _health;
+        SkillCaster _skills;
+
+        // 스킬 시스템이 쓴다
+        public TuningConfig Config => cfg;
+        public LayerMask EnemyMask => enemyMask;
+        public void SetFacing(bool right) => FacingRight = right;
 
         Vector2 _moveInput;
 
@@ -69,13 +74,6 @@ namespace Proto.Player
         /// <summary>콤보가 끝나서 대기 자세로 돌아갈 때.</summary>
         public event Action ComboEnded;
 
-        // 채굴 상태
-        OreNode _target;
-        float _mineProgress;
-        public bool IsMining => _target != null;
-
-        public event Action<float> MineProgressChanged;  // 0~1, 채굴 중이 아니면 -1
-        public event Action<OreNode> OreMined;
         public event Action Attacked;
 
         public bool ControlEnabled { get; set; } = true;
@@ -97,6 +95,8 @@ namespace Proto.Player
             _health = GetComponent<Health>();
             if (cfg != null) _health.Configure(cfg.maxHealth);
             _health.Damaged += OnDamaged;
+            _skills = GetComponent<SkillCaster>();
+            if (_skills == null) _skills = gameObject.AddComponent<SkillCaster>();
 
             // 몬스터에 막혀 못 움직이는 일은 없어야 한다. 벨트스크롤에서 몸끼리 막히면
             // 몰렸을 때 빠져나갈 길이 없다. 공격 판정은 OverlapSphere라 충돌과 무관하다.
@@ -112,34 +112,40 @@ namespace Proto.Player
         {
             if (!ControlEnabled)
             {
+                IsRunning = false;
                 // 멈춰 세운다. Move를 안 부르면 velocity가 마지막 값에 남아 제자리 달리기를 한다.
                 if (_cc.enabled) _cc.SimpleMove(Vector3.zero);
-                if (IsMining) CancelMining();
                 if (_step > 0) EndCombo(false);
+                _skills.Cancel();
                 return;
             }
 
             _moveInput = GameInput.MoveValue;
-            if (IsMining || _step > 0) { UpdateRun(); }
 
-            if (IsMining) { TickMining(); return; }
+            // 스킬 — 쓰는 동안은 스킬이 몸을 움직인다. 평타 도중에도 끊고 낼 수 있다
+            if (_skills.Casting) { UpdateRun(); return; }
+            if (_skills.TryCast(_moveInput)) return;
+            if (_step > 0) { UpdateRun(); }
 
             if (_step > 0) { TickCombo(); return; }
 
             TickMove();
 
             if (GameInput.AttackPressed) StartStep(1);
-            else if (GameInput.MinePressed) TryStartMining();
-            // Z(스킬)와 커맨드는 스킬 시스템에서 붙인다
         }
 
-        // ── 걷기 · 달리기 ──
-        // 좌우 방향키를 한 번 누르면 걷고, 짧은 사이에 두 번 누르면 달린다 (손을 떼거나 반대로 누르면 다시 걷기).
+        // ── 걷기 · 달리기 (던파 방식) ──
+        // 좌우 방향키를 짧은 사이에 두 번 누르면 달린다. 위아래 두 번은 달리지 않는다 (던파도 같다).
+        // 한번 달리기 시작하면 방향키를 하나라도 누르고 있는 동안 계속 달린다 —
+        // 위아래 · 대각선으로 꺾어도, 반대쪽으로 돌아도 달리기가 유지된다. 손을 다 떼면 걷기로 돌아간다.
+        // 키를 바꿔 누르는 사이의 아주 짧은 빈틈(RunGrace)에는 끊기지 않는다.
         // 패드 스틱은 끝까지 빠르게 두 번 밀면 달린다.
         const float DoubleTapWindow = 0.28f;
+        const float RunGrace = 0.12f;
         int _lastTapDir;          // -1 왼쪽 · +1 오른쪽
         float _lastTapAt = -10f;
         int _heldDir;
+        float _idleSince = -1f;
         public bool IsRunning { get; private set; }
 
         void UpdateRun()
@@ -147,14 +153,21 @@ namespace Proto.Player
             int dir = _moveInput.x > 0.5f ? 1 : _moveInput.x < -0.5f ? -1 : 0;
             if (dir != 0 && _heldDir != dir)
             {
-                // 새로 눌렀다 — 같은 쪽을 방금 전에도 눌렀으면 달리기
+                // 새로 눌렀다 — 같은 쪽을 방금 전에도 눌렀으면 달리기 (이미 달리는 중이면 그대로)
                 float now = Time.unscaledTime;
-                IsRunning = dir == _lastTapDir && now - _lastTapAt <= DoubleTapWindow;
+                if (dir == _lastTapDir && now - _lastTapAt <= DoubleTapWindow) IsRunning = true;
                 _lastTapDir = dir;
                 _lastTapAt = now;
             }
-            if (dir == 0) IsRunning = false;
             _heldDir = dir;
+
+            // 방향키를 전부 뗐을 때만 달리기가 끝난다
+            if (_moveInput.sqrMagnitude > 0.04f) _idleSince = -1f;
+            else if (IsRunning)
+            {
+                if (_idleSince < 0f) _idleSince = Time.unscaledTime;
+                else if (Time.unscaledTime - _idleSince >= RunGrace) IsRunning = false;
+            }
         }
 
         void TickMove()
@@ -163,7 +176,7 @@ namespace Proto.Player
             var dir = new Vector3(_moveInput.x, 0f, _moveInput.y);
             if (dir.sqrMagnitude > 1f) dir.Normalize();
 
-            _cc.SimpleMove(dir * (IsRunning ? cfg.moveSpeed : cfg.walkSpeed));
+            _cc.SimpleMove(dir * (IsRunning ? cfg.moveSpeed : cfg.walkSpeed) * _skills.SpeedMul);
 
             // 좌우 방향만 바라본다 (벨트스크롤이므로 깊이 방향은 바라보지 않는다)
             if (Mathf.Abs(_moveInput.x) > 0.01f)
@@ -174,6 +187,7 @@ namespace Proto.Player
 
         void StartStep(int n)
         {
+            IsRunning = false;   // 공격하면 달리기가 끝난다 — 다시 달리려면 두 번 눌러야 한다
             // 타를 시작할 때만 방향을 바꿀 수 있다 — 휘두르는 도중에는 돌지 않는다
             if (Mathf.Abs(_moveInput.x) > 0.3f) FacingRight = _moveInput.x > 0f;
 
@@ -246,7 +260,7 @@ namespace Proto.Player
         void ResolveHit(float mul, bool finisher)
         {
             Vector3 facing = FacingRight ? Vector3.right : Vector3.left;
-            var hits = Physics.OverlapSphere(transform.position, cfg.attackRange, enemyMask);
+            var hits = Physics.OverlapCapsule(transform.position, transform.position + Vector3.up * 3.2f, cfg.attackRange, enemyMask);   // 위로 길게 — 띄운 적도 이어 친다
             int connected = 0;
             bool killed = false;
             var feel = Proto.Feel.Feel.I;
@@ -277,11 +291,12 @@ namespace Proto.Player
 
                 // "단단한" 같은 접두사는 받는 피해를 줄인다.
                 // 그만큼 전투가 길어지고, 길어진 만큼 피로도를 먹는다.
-                float dmg = cfg.attackDamage * mul;
+                float dmg = cfg.attackDamage * mul * _skills.DamageMul;
                 var ec = h.GetComponentInParent<Proto.Enemy.EnemyController>();
                 if (ec != null) dmg = ec.ModifyIncomingDamage(dmg);
                 var boss = h.GetComponentInParent<Proto.Enemy.BossController>();
                 if (boss != null) dmg = boss.ModifyIncomingDamage(dmg);   // 그로기 동안 더 아프다
+                dmg = CombatMath.Crit(cfg, dmg, out bool crit);   // 장비 치명타
 
                 hp.TakeDamage(dmg, transform.position);
                 connected++;
@@ -294,7 +309,7 @@ namespace Proto.Player
                     feel.Spark(at, facing, kill);
                     Proto.Feel.HitFx.Impact(at, kill || finisher);
                     feel.Number(at + Vector3.up * 0.6f, dmg,
-                        kill ? Proto.Feel.Feel.NumberKind.Kill : Proto.Feel.Feel.NumberKind.Normal);
+                        kill ? Proto.Feel.Feel.NumberKind.Kill : crit ? Proto.Feel.Feel.NumberKind.Crit : Proto.Feel.Feel.NumberKind.Normal);
                 }
             }
 
@@ -328,62 +343,19 @@ namespace Proto.Player
             return target.position + Vector3.up * h - facing * r * 0.6f;
         }
 
-        void TryStartMining()
+        /// <summary>스킬이 시작될 때 — 평타를 끊는다.</summary>
+        public void BeginSkill()
         {
-            OreNode best = null;
-            float bestDist = float.MaxValue;
-
-            foreach (var ore in FindObjectsByType<OreNode>(FindObjectsSortMode.None))
-            {
-                if (ore.Depleted) continue;
-                float d = Vector3.Distance(transform.position, ore.transform.position);
-                if (d < cfg.mineRange && d < bestDist) { best = ore; bestDist = d; }
-            }
-
-            if (best == null) return;
-            _target = best;
-            _mineProgress = 0f;
-            MineProgressChanged?.Invoke(0f);
+            IsRunning = false;
+            if (_step > 0) EndCombo(false);
         }
 
-        void TickMining()
-        {
-            // 캐는 도중에 키를 떼면 중단
-            if (!GameInput.MineHeld) { CancelMining(); return; }
-
-            _mineProgress += Time.deltaTime / Mathf.Max(0.01f, cfg.mineDuration);
-            MineProgressChanged?.Invoke(Mathf.Clamp01(_mineProgress));
-
-            if (_mineProgress >= 1f)
-            {
-                var ore = _target;
-                _target = null;
-                MineProgressChanged?.Invoke(-1f);
-                ore.Deplete();
-                OreMined?.Invoke(ore);
-            }
-        }
-
-        void CancelMining()
-        {
-            _target = null;
-            _mineProgress = 0f;
-            MineProgressChanged?.Invoke(-1f);
-        }
+        public void EndSkill() { }
 
         void OnDamaged(float amount, Vector3 src)
         {
             // 플레이어는 피격 경직이 없다. 맞아도 이동·공격이 끊기지 않고
             // 넉백도 받지 않는다. 피드백은 화면 흔들림과 HP로만 준다.
-            //
-            // 대신 채굴은 중단된다 — 캐는 동안 무방비라는 것이
-            // 이 게임에서 유일하게 피격이 플레이어를 멈추는 지점이다.
-            if (IsMining)
-            {
-                _mineProgress *= cfg.mineProgressKeptOnHit;
-                if (cfg.mineProgressKeptOnHit <= 0f) CancelMining();
-                else MineProgressChanged?.Invoke(Mathf.Clamp01(_mineProgress));
-            }
 
             if (Proto.Feel.Feel.I != null)
             {
@@ -399,8 +371,6 @@ namespace Proto.Player
             if (cfg == null) return;
             Gizmos.color = new Color(1f, 0.4f, 0.3f, 0.35f);
             Gizmos.DrawWireSphere(transform.position, cfg.attackRange);
-            Gizmos.color = new Color(0.4f, 0.8f, 1f, 0.25f);
-            Gizmos.DrawWireSphere(transform.position, cfg.mineRange);
         }
     }
 }

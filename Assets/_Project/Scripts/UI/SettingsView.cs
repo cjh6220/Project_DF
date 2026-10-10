@@ -13,7 +13,8 @@ namespace Proto.UI
     /// 설정 창 — 마을 메뉴의 [설정], 던전 포기 창의 [설정]에서 연다.
     ///
     ///   탭    화면 · 사운드 · 조작 · 게임
-    ///   조작  ↑↓ 줄 고르기 · ←→ 값 바꾸기 · 결정키 = 키 바꾸기 / 다음 값 · Esc 닫기 (마우스는 ◀ ▶ 클릭)
+    ///   조작  ↑↓ 줄 고르기 · ←→ 값 바꾸기 · 결정키 = 다음 값 · Q/E (L1/R1) 탭 · Esc 닫기 (마우스는 ◀ ▶ 클릭)
+    ///         맨 위 = 탭 줄, 맨 아래 = [기본값으로] [닫기] 줄 — 마우스 없이 모든 버튼에 닿는다
     ///
     /// 바꾸는 즉시 적용 · 저장한다 (GameSettings.Commit). 따로 "적용" 버튼이 없다.
     /// </summary>
@@ -43,7 +44,10 @@ namespace Proto.UI
         readonly List<Button> _tabs = new();
         readonly List<Row> _rows = new();
         TextMeshProUGUI _hint;
-        int _tab, _focus;                 // _focus -1 = 탭 줄
+        int _tab, _focus;                 // _focus -1 = 탭 줄, _rows.Count = 아래 버튼 줄
+        int _bottom = 1;                  // 아래 줄에서 고른 버튼 (0 기본값으로 · 1 닫기)
+        Button _reset, _close;
+        bool OnBottom => _focus >= _rows.Count;
         bool _rebinding;
         int _rebindEndFrame = -10;
         float _prevTimeScale = 1f;
@@ -72,6 +76,7 @@ namespace Proto.UI
             _focus = 0;
             Refresh();
             GameInput.SchemeChanged += Refresh;
+            UiFocus.Block(this, () => IsOpen);   // 뒤 창(메뉴)의 버튼이 같은 Enter를 받지 않게
         }
 
         public void Close()
@@ -82,6 +87,7 @@ namespace Proto.UI
             _root.gameObject.SetActive(false);
             Time.timeScale = _prevTimeScale;
             GameInput.SchemeChanged -= Refresh;
+            UiFocus.Unblock(this);
         }
 
         // ───────────────────────────── 만들기 ─────────────────────────────
@@ -125,6 +131,7 @@ namespace Proto.UI
             rr.pivot = new Vector2(0f, 0f);
             rr.anchoredPosition = new Vector2(70f, 34f);
             reset.onClick.AddListener(() => { GameSettings.ResetDefaults(); Refresh(); });
+            _reset = reset;
 
             var close = UiKit.Button(_panel, "Close", "닫기", new Vector2(160f, 44f), 19);
             UiKit.Style(close, UiKit.ButtonKind.Primary);
@@ -133,9 +140,10 @@ namespace Proto.UI
             cr.pivot = new Vector2(1f, 0f);
             cr.anchoredPosition = new Vector2(-70f, 34f);
             close.onClick.AddListener(Close);
+            _close = close;
 
             _hint = UiKit.Text(_panel, "Hint", "", 17);
-            UiKit.Place(_hint.rectTransform, new Vector2(0.5f, 0f), new Vector2(0f, 56f), new Vector2(460f, 26f));
+            UiKit.Place(_hint.rectTransform, new Vector2(0.5f, 0f), new Vector2(0f, 104f), new Vector2(760f, 26f));   // 아래 버튼 줄 바로 위
             _hint.color = new Color(1f, 1f, 1f, 0.5f);
         }
 
@@ -155,7 +163,7 @@ namespace Proto.UI
                 default: BuildGame(); break;
             }
             for (int i = 0; i < _rows.Count; i++) MakeRow(_rows[i], i);
-            if (_focus >= _rows.Count) _focus = _rows.Count - 1;
+            if (_focus > _rows.Count) _focus = _rows.Count;
             Refresh();
         }
 
@@ -354,7 +362,9 @@ namespace Proto.UI
                 if (r.Arrows != null) r.Arrows.SetActive(on);
             }
             string nav = InputGlyphs.Of(Act.Navigate), ok = InputGlyphs.Of(Act.Interact), back = InputGlyphs.Of(Act.Cancel);
-            _hint.text = _rebinding ? "바꿀 키를 누르세요  ·  Esc 취소" : $"{nav} 고르기 · 바꾸기   {ok} 결정   {back} 닫기";
+            string tabs = InputGlyphs.Of(Act.PagePrev) + " / " + InputGlyphs.Of(Act.PageNext);
+            _hint.text = _rebinding ? "바꿀 키를 누르세요  ·  Esc 취소" : $"{nav} 고르기 · 바꾸기   {tabs} 탭   {ok} 결정   {back} 닫기";
+            Lit();
         }
 
         // ───────────────────────────── 키 바꾸기 ─────────────────────────────
@@ -402,28 +412,35 @@ namespace Proto.UI
 
             if (GameInput.CancelPressed || GameInput.MenuPressed) { Close(); return; }
 
+            int page = GameInput.PageStep;
+            if (page != 0) { ShowTab(_tab + page); return; }
+
             var d = GameInput.Navigate();
             if (d.y != 0)
             {
-                _focus = Mathf.Clamp(_focus - d.y, -1, _rows.Count - 1);
+                _focus = Mathf.Clamp(_focus - d.y, -1, _rows.Count);
                 Refresh();
             }
             else if (d.x != 0)
             {
                 if (_focus < 0) ShowTab(_tab + d.x);
+                else if (OnBottom) { _bottom = d.x < 0 ? 0 : 1; Refresh(); }
                 else DoStep(_focus, d.x);
             }
             else if (GameInput.InteractPressed)
             {
                 if (_focus < 0) ShowTab(_tab + 1);
+                else if (OnBottom) (_bottom == 0 ? _reset : _close).onClick.Invoke();
                 else DoActivate(_focus);
             }
+        }
 
-            for (int i = 0; i < _tabs.Count; i++)
-            {
-                var img = _tabs[i].image;
-                img.color = (_focus < 0 && i == _tab) ? new Color(1f, 1f, 1f, 1f) : new Color(1f, 1f, 1f, i == _tab ? 1f : 0.75f);
-            }
+        /// <summary>키보드 초점 표시 — 탭 줄이면 지금 탭, 아래 줄이면 고른 버튼에 금색 테.</summary>
+        void Lit()
+        {
+            for (int i = 0; i < _tabs.Count; i++) FocusMarker.Light(_tabs[i], _focus < 0 && i == _tab);
+            FocusMarker.Light(_reset, OnBottom && _bottom == 0);
+            FocusMarker.Light(_close, OnBottom && _bottom == 1);
         }
     }
 }

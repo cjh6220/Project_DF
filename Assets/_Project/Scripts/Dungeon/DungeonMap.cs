@@ -10,31 +10,17 @@ namespace Proto.Dungeon
     [Flags]
     public enum Dir { None = 0, N = 1, E = 2, S = 4, W = 8 }
 
-    /// <summary>
-    /// 방 안 광맥 하나의 상태. 위치까지 기억해 두는 이유는 두 가지다.
-    ///   1. 캐고 나간 광맥이 돌아왔을 때 되살아나면 무한 파밍이 된다
-    ///   2. 안 캔 광맥이 다른 자리로 옮겨가면 "저기 결정 있었지"가 성립하지 않는다
-    /// </summary>
-    public class OreSpot
-    {
-        public Vector3 LocalPos;
-        public Proto.Mining.OreGrade Grade;
-        public int Amount;
-        public bool Mined;
-    }
-
     public class Room
     {
         public Vector2Int Cell;
         public RoomKind Kind = RoomKind.Normal;
         public Dir Exits = Dir.None;
 
-        /// <summary>본 경로(입구→보스) 위에 있는 방인가. 가지 방에 광맥을 몰아주기 위해 쓴다.</summary>
+        /// <summary>본 경로(입구→보스) 위에 있는 방인가.</summary>
         public bool OnMainPath;
 
         public bool Visited;
         public bool Cleared;
-        public int OreCount;
         public int EnemyCount;
         /// <summary>
         /// 이 방에 붙을 챔피언 접두사 목록. 비어 있으면 일반 몬스터만 나온다.
@@ -42,21 +28,18 @@ namespace Proto.Dungeon
         /// </summary>
         public System.Collections.Generic.List<Proto.Enemy.Affix> Champions = new();
 
-        /// <summary>
-        /// 광맥 배치. null이면 아직 이 방에 처음 들어온 것이고, 그때 한 번 만든다.
-        /// </summary>
-        public System.Collections.Generic.List<OreSpot> Ores;
+        /// <summary>보물방 — 상자를 이미 열었나. 다시 와도 열린 채로 남는다.</summary>
+        public bool ChestOpened;
 
-        /// <summary>아직 캘 게 남았는가.</summary>
-        public bool HasOreLeft
-        {
-            get
-            {
-                if (Ores == null) return OreCount > 0;
-                foreach (var o in Ores) if (!o.Mined) return true;
-                return false;
-            }
-        }
+        /// <summary>가방이 꽉 차서 못 주운 장비 — 다시 들어오면 그 자리에 그대로 있다.</summary>
+        public System.Collections.Generic.List<GroundItem> GroundLoot = new();
+    }
+
+    /// <summary>바닥에 남은 장비 하나 (방 안 위치).</summary>
+    public class GroundItem
+    {
+        public Proto.Core.Item Item;
+        public Vector3 Pos;
     }
 
     /// <summary>

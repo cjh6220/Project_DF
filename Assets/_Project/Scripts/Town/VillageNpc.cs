@@ -4,7 +4,7 @@ using Proto.Core;
 
 namespace Proto.Town
 {
-    public enum NpcRole { Growth, Skill, Waystone }
+    public enum NpcRole { Growth, Skill, Waystone, Smith }
 
     /// <summary>
     /// 마을 NPC 하나. 머리 위 이름표, 가까이 가면 뜨는 [Space 대화], 할 일이 있으면 "!".

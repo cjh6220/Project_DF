@@ -5,7 +5,7 @@ using Proto.Data;
 
 namespace Proto.Core
 {
-    public enum NodeId { Stamina, Step, Pickaxe, Power, BossSense }
+    public enum NodeId { Stamina, Step, Power, BossSense, LootLuck, BagSpace, Salvage, ChestRare, ChestExtra }
 
     /// <summary>
     /// 스킬트리 노드 하나. 지금은 5개뿐이지만 구조는 114개까지 그대로 간다.
@@ -46,7 +46,7 @@ namespace Proto.Core
     /// 실제로 기억에 남는 건 이런 종류의 노드다.
     ///
     /// 자원 계열 분리를 지킨다.
-    ///   채굴 자원(원석·결정) → 더 오래 버틴다
+    ///   정수 → 탐험 성장(더 오래 버틴다)
     ///   전투 자원(정수·핵)   → 더 강해진다 / 정보를 연다
     /// </summary>
     public class Progression
@@ -54,7 +54,6 @@ namespace Proto.Core
         /// <summary>
         /// 트리 배치 — 중앙에서 갈래가 뻗는다.
         ///   위   탐험 (지구력 → 발걸음 → 보스 감지)
-        ///   오른쪽 채굴 (곡괭이)
         ///   왼쪽  전투 (완력)
         /// 노드가 늘어나면 각 갈래 끝에 이어 붙인다.
         /// </summary>
@@ -62,13 +61,13 @@ namespace Proto.Core
         {
             new UpgradeNode {
                 Id = NodeId.Stamina, Name = "지구력", Effect = "최대 피로도 +20",
-                Cost = ResourceId.Ore, BaseCost = 8, CostStep = 6, MaxLevel = 5,
+                Cost = ResourceId.Essence, BaseCost = 8, CostStep = 6, MaxLevel = 5,
                 Pos = new Vector2(0f, 150f), Icon = "지", IconKey = "explore_endurance",
                 Total = lv => "최대 피로도 +" + (20 * lv)
             },
             new UpgradeNode {
                 Id = NodeId.Step, Name = "발걸음", Effect = "새 방 진입 비용 -2",
-                Cost = ResourceId.Ore, BaseCost = 12, CostStep = 10, MaxLevel = 4,
+                Cost = ResourceId.Essence, BaseCost = 12, CostStep = 10, MaxLevel = 4,
                 Pos = new Vector2(0f, 300f), Icon = "발", IconKey = "explore_footsteps", Requires = new[] { NodeId.Stamina },
                 Total = lv => "새 방 진입 비용 -" + (2 * lv)
             },
@@ -79,16 +78,42 @@ namespace Proto.Core
                 Total = lv => lv > 0 ? "보스방 위치 표시" : "보스방 위치 모름"
             },
             new UpgradeNode {
-                Id = NodeId.Pickaxe, Name = "곡괭이", Effect = "채굴 시간 -0.5초",
-                Cost = ResourceId.Crystal, BaseCost = 6, CostStep = 5, MaxLevel = 3,
-                Pos = new Vector2(170f, 0f), Icon = "곡", IconKey = "mine_pickaxe",
-                Total = lv => "채굴 시간 -" + (0.5f * lv).ToString("0.0") + "초"
-            },
-            new UpgradeNode {
                 Id = NodeId.Power, Name = "완력", Effect = "공격력 +5",
                 Cost = ResourceId.Essence, BaseCost = 15, CostStep = 12, MaxLevel = 5,
                 Pos = new Vector2(-170f, 0f), Icon = "완", IconKey = "combat_might",
                 Total = lv => "공격력 +" + (5 * lv)
+            },
+
+            // ── 장비 갈래 ──
+            new UpgradeNode {
+                Id = NodeId.LootLuck, Name = "장비 감각", Effect = "몬스터 장비 드랍률 +25%",
+                Cost = ResourceId.Essence, BaseCost = 12, CostStep = 10, MaxLevel = 4,
+                Icon = "감", IconKey = "gear_loot_luck", Requires = new[] { NodeId.BagSpace },
+                Total = lv => "몬스터 장비 드랍률 +" + (25 * lv) + "%"
+            },
+            new UpgradeNode {
+                Id = NodeId.BagSpace, Name = "큰 가방", Effect = "가방 +5칸 (최대 30칸)",
+                Cost = ResourceId.Gold, BaseCost = 30, CostStep = 40, MaxLevel = 5,
+                Icon = "가", IconKey = "gear_bag_space",
+                Total = lv => "가방 " + (Inventory.BaseCapacity + 5 * lv) + "칸"
+            },
+            new UpgradeNode {
+                Id = NodeId.Salvage, Name = "분해 숙련", Effect = "분해 시 장비 가루 +20%",
+                Cost = ResourceId.Dust, BaseCost = 30, CostStep = 30, MaxLevel = 5,
+                Icon = "분", IconKey = "gear_salvage", Requires = new[] { NodeId.BagSpace },
+                Total = lv => "분해 시 장비 가루 +" + (20 * lv) + "%"
+            },
+            new UpgradeNode {
+                Id = NodeId.ChestRare, Name = "보물 감정", Effect = "보물상자에서 희귀 등급 이상만 나온다",
+                Cost = ResourceId.Core, BaseCost = 5, CostStep = 0, MaxLevel = 1,
+                Icon = "감", IconKey = "gear_chest_rare", Requires = new[] { NodeId.LootLuck }, Keystone = true,
+                Total = lv => lv > 0 ? "상자 장비 희귀 이상 확정" : "상자 장비 고급 이상"
+            },
+            new UpgradeNode {
+                Id = NodeId.ChestExtra, Name = "넘치는 상자", Effect = "보물상자 장비 +1개",
+                Cost = ResourceId.Core, BaseCost = 8, CostStep = 0, MaxLevel = 1,
+                Icon = "상", IconKey = "gear_chest_extra", Requires = new[] { NodeId.ChestRare },
+                Total = lv => "보물상자 장비 " + (ItemDb.ChestItemCount + lv) + "개"
             }
         };
 
@@ -101,11 +126,21 @@ namespace Proto.Core
         public bool IsMaxed(UpgradeNode n) => Level(n.Id) >= n.MaxLevel;
         public int NextCost(UpgradeNode n) => n.CostAt(Level(n.Id));
 
-        /// <summary>선행 노드를 모두 1레벨 이상 찍었는가.</summary>
+        /// <summary>찍은 레벨의 합 — 성장 트리 바깥 고리를 연다.</summary>
+        public int TotalLevels { get { int s = 0; foreach (var v in _levels.Values) s += v; return s; } }
+
+        /// <summary>노드가 있는 고리가 열렸는가 (GrowthTree.RingNeed).</summary>
+        public bool RingOpen(UpgradeNode n)
+        {
+            var g = GrowthTree.Of(n.Id);
+            return g == null || TotalLevels >= GrowthTree.RingNeed[g.Ring];
+        }
+
+        /// <summary>선행 노드를 모두 1레벨 이상 찍었고, 고리도 열렸는가.</summary>
         public bool IsUnlocked(UpgradeNode n)
         {
             foreach (var r in n.Requires) if (Level(r) <= 0) return false;
-            return true;
+            return RingOpen(n);
         }
 
         public bool CanBuy(UpgradeNode n, ResourceWallet bank) =>
@@ -150,7 +185,6 @@ namespace Proto.Core
         {
             live.maxStamina       = baseCfg.maxStamina + 20f * Level(NodeId.Stamina);
             live.staminaOnNewRoom = Mathf.Max(0f, baseCfg.staminaOnNewRoom - 2f * Level(NodeId.Step));
-            live.mineDuration     = Mathf.Max(0.3f, baseCfg.mineDuration - 0.5f * Level(NodeId.Pickaxe));
             live.attackDamage     = baseCfg.attackDamage + 5f * Level(NodeId.Power);
         }
     }

@@ -1,0 +1,163 @@
+namespace Proto.Core
+{
+    public enum Act { Attack, Skill, Interact, Cancel, Menu, Chord, Pan, Zoom, Navigate, PagePrev, PageNext, AltA, AltB, Inventory }
+
+    /// <summary>
+    /// 화면에 띄우는 버튼 표시. 지금 쓰는 장치(키보드 / PS / Xbox)에 맞춰 바뀐다.
+    ///
+    /// 버튼 아이콘 그림(Resources/Sprite Assets/ButtonIcons — TMP 스프라이트)을 글자 사이에 끼워 넣는다:
+    ///   <sprite="ButtonIcons" name="ps_cross">
+    /// 아이콘 이름: ps_square · ps_triangle · ps_circle · ps_cross · ps_options · ps_l1/r1/l2/r2 · ps_ls/rs · ps_dpad
+    ///             xb_a · xb_b · xb_x · xb_y · xb_menu · xb_view · xb_lb/rb/lt/rt · xb_ls/rs · xb_dpad
+    ///             kb_z · kb_x · kb_c · kb_a · kb_s · kb_d · kb_f · kb_esc · kb_space · kb_up/down/left/right
+    /// 그림이 없으면(빌드 전) 예전처럼 글자와 색으로 그린다.
+    /// </summary>
+    public static class InputGlyphs
+    {
+        const string Asset = "ButtonIcons";
+        static int _has = -1;   // -1 모름 · 0 없음 · 1 있음
+
+        static bool HasIcons
+        {
+            get
+            {
+                if (_has < 0) _has = UnityEngine.Resources.Load<TMPro.TMP_SpriteAsset>("Sprite Assets/" + Asset) != null ? 1 : 0;
+                return _has == 1;
+            }
+        }
+
+        static string Icon(string name, string fallback) =>
+            HasIcons ? "<sprite=\"" + Asset + "\" name=\"" + name + "\">" : fallback;
+
+        // 글자 대체 (아이콘이 없을 때)
+        const string TPsSquare = "<color=#ff9ad5>□</color>", TPsTriangle = "<color=#5fe3b0>△</color>",
+                     TPsCircle = "<color=#ff6b6b>○</color>", TPsCross = "<color=#86b6ff>×</color>";
+        const string TXbX = "<color=#4aa3ff><b>X</b></color>", TXbY = "<color=#ffd23a><b>Y</b></color>",
+                     TXbB = "<color=#ff5a5a><b>B</b></color>", TXbA = "<color=#6ad35a><b>A</b></color>";
+
+        static string PsSquare => Icon("ps_square", TPsSquare);
+        static string PsTriangle => Icon("ps_triangle", TPsTriangle);
+        static string PsCircle => Icon("ps_circle", TPsCircle);
+        static string PsCross => Icon("ps_cross", TPsCross);
+        static string XbX => Icon("xb_x", TXbX);
+        static string XbY => Icon("xb_y", TXbY);
+        static string XbB => Icon("xb_b", TXbB);
+        static string XbA => Icon("xb_a", TXbA);
+
+        static string Text(string k) => "<color=#ffd45a>" + k + "</color>";
+
+        /// <summary>키보드 키 하나 — 키캡 그림이 있는 키는 그림으로, 없으면 노란 글자로.</summary>
+        static string Key(string k)
+        {
+            string id = null;
+            switch (k)
+            {
+                case "Z": case "X": case "C": case "A": case "S": case "D": case "F": id = "kb_" + k.ToLowerInvariant(); break;
+                case "Esc": case "Escape": id = "kb_esc"; break;
+                case "Space": id = "kb_space"; break;
+                case "↑": id = "kb_up"; break;
+                case "↓": id = "kb_down"; break;
+                case "←": id = "kb_left"; break;
+                case "→": id = "kb_right"; break;
+            }
+            return id != null ? Icon(id, Text(k)) : Text(k);
+        }
+
+        public static string Of(Act a)
+        {
+            switch (GameInput.Scheme)
+            {
+                case InputScheme.PlayStation:
+                    switch (a)
+                    {
+                        case Act.Attack: return PsSquare;
+                        case Act.Skill: return PsTriangle;
+                        case Act.Interact: return PsCross;
+                        case Act.Cancel: return PsCircle;
+                        case Act.Menu: return Icon("ps_options", Text("OPTIONS"));
+                        case Act.Chord: return Icon("ps_r1", Text("R1"));
+                        case Act.Pan: return Icon("ps_rs", Text("R스틱"));
+                        case Act.Zoom: return Icon("ps_l2", Text("L2")) + Icon("ps_r2", "/" + Text("R2"));
+                        case Act.PagePrev: return Icon("ps_l1", Text("L1"));
+                        case Act.PageNext: return Icon("ps_r1", Text("R1"));
+                        case Act.AltA: return Text("R3");
+                        case Act.AltB: case Act.Inventory: return Text("공유");
+                        default: return Icon("ps_dpad", Text("십자키"));
+                    }
+                case InputScheme.Xbox:
+                    switch (a)
+                    {
+                        case Act.Attack: return XbX;
+                        case Act.Skill: return XbY;
+                        case Act.Interact: return XbA;
+                        case Act.Cancel: return XbB;
+                        case Act.Menu: return Icon("xb_menu", Text("Menu"));
+                        case Act.Chord: return Icon("xb_rb", Text("RB"));
+                        case Act.Pan: return Icon("xb_rs", Text("R스틱"));
+                        case Act.Zoom: return Icon("xb_lt", Text("LT")) + Icon("xb_rt", "/" + Text("RT"));
+                        case Act.PagePrev: return Icon("xb_lb", Text("LB"));
+                        case Act.PageNext: return Icon("xb_rb", Text("RB"));
+                        case Act.AltA: return Text("R3");
+                        case Act.AltB: case Act.Inventory: return Icon("xb_view", Text("View"));
+                        default: return Icon("xb_dpad", Text("십자키"));
+                    }
+                default:
+                    switch (a)
+                    {
+                        case Act.Attack: return Key(GameInput.KeyLabel(GameInput.Attack, 0));
+                        case Act.Skill: return Key(GameInput.KeyLabel(GameInput.Skill, 0));
+                        case Act.Interact: return Key(GameInput.KeyLabel(GameInput.Interact, 0));
+                        case Act.Cancel: case Act.Menu: return Key("Esc");
+                        case Act.Chord: return "";
+                        case Act.Pan: return Text("드래그");
+                        case Act.Zoom: return Text("휠");
+                        case Act.PagePrev: return Key("Q");
+                        case Act.PageNext: return Key("E");
+                        case Act.AltA: return Key("R");
+                        case Act.AltB: return Key("Tab");
+                        case Act.Inventory: return Key("I");
+                        default: return Text("방향키");
+                    }
+            }
+        }
+
+        /// <summary>퀵슬롯 i번 키. 키보드 A S D F, 패드 R1 + □ △ ○ ×.</summary>
+        public static string Slot(int i)
+        {
+            switch (GameInput.Scheme)
+            {
+                case InputScheme.PlayStation: return new[] { PsSquare, PsTriangle, PsCircle, PsCross }[i];
+                case InputScheme.Xbox: return new[] { XbX, XbY, XbB, XbA }[i];
+                default:
+                {
+                    var r = GameInput.Rebindables();
+                    return Key(GameInput.KeyLabel(r[7 + i].Action, r[7 + i].Index));
+                }
+            }
+        }
+
+        /// <summary>얼굴 버튼 네 개 — 장치 바뀜 알림에 쓴다.</summary>
+        public static string FaceButtons()
+        {
+            switch (GameInput.Scheme)
+            {
+                case InputScheme.PlayStation: return PsSquare + PsTriangle + PsCircle + PsCross;
+                case InputScheme.Xbox: return XbA + XbB + XbX + XbY;
+                default: return Key("Z") + Key("X") + Key("C");
+            }
+        }
+
+        /// <summary>"↓→ Z" 같은 커맨드 표기를 지금 장치의 버튼으로 바꾼다. Z = 스킬, X = 공격.</summary>
+        public static string Command(string cmd)
+        {
+            var sb = new System.Text.StringBuilder();
+            foreach (char c in cmd)
+            {
+                if (c == 'Z') sb.Append(Of(Act.Skill));
+                else if (c == 'X') sb.Append(Of(Act.Attack));
+                else sb.Append(c);
+            }
+            return sb.ToString();
+        }
+    }
+}

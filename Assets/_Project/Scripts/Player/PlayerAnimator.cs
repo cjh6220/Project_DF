@@ -17,10 +17,7 @@ namespace Proto.Player
     {
         [SerializeField] Animator animator;
         [SerializeField] Transform model;
-        [Tooltip("평소 손에 든 무기 (카타나). 채굴 중에는 숨긴다.")]
         [SerializeField] GameObject weapon;
-        [Tooltip("채굴 도구 (곡괭이). 채굴할 때만 꺼낸다.")]
-        [SerializeField] GameObject tool;
 
         [Tooltip("모델이 +Z를 보고 있을 때 오른쪽을 보게 하는 Y 회전값")]
         [SerializeField] float faceRightYaw = 90f;
@@ -29,7 +26,6 @@ namespace Proto.Player
         [SerializeField] float turnSpeed = 18f;
 
         static readonly int Speed = Animator.StringToHash("Speed");
-        static readonly int Mining = Animator.StringToHash("Mining");
         static readonly int Dead = Animator.StringToHash("Dead");
 
         PlayerController _player;
@@ -44,17 +40,12 @@ namespace Proto.Player
 
             if (animator == null) animator = GetComponentInChildren<Animator>();
             if (model == null && animator != null) model = animator.transform;
-            if (weapon == null || tool == null)
+            if (weapon == null)
                 foreach (var t in GetComponentsInChildren<Transform>(true))
-                {
-                    if (weapon == null && t.name == "Weapon") weapon = t.gameObject;
-                    if (tool == null && t.name == "Tool") tool = t.gameObject;
-                }
-            ShowTool(false);
+                    if (t.name == "Weapon") { weapon = t.gameObject; break; }
 
             _player.Attacked += OnAttacked;
             _player.ComboEnded += OnComboEnded;
-            _player.MineProgressChanged += OnMineProgress;
             if (_health != null)
             {
                 _health.Died += OnDied;
@@ -67,7 +58,6 @@ namespace Proto.Player
             if (_player == null) return;
             _player.Attacked -= OnAttacked;
             _player.ComboEnded -= OnComboEnded;
-            _player.MineProgressChanged -= OnMineProgress;
             if (_health != null)
             {
                 _health.Died -= OnDied;
@@ -83,13 +73,6 @@ namespace Proto.Player
             var v = _cc != null ? _cc.velocity : Vector3.zero;
             v.y = 0f;
             animator.SetFloat(Speed, v.magnitude);
-
-            // 채굴 상체 층 — 꺼낼 땐 빠르게, 넣을 땐 살짝 천천히
-            if (animator.layerCount > MineLayer)
-            {
-                _mineWeight = Mathf.MoveTowards(_mineWeight, _mining ? 1f : 0f, Time.deltaTime * (_mining ? 10f : 6f));
-                animator.SetLayerWeight(MineLayer, _mineWeight);
-            }
 
             if (model == null) return;
             float yaw = _player.FacingRight ? faceRightYaw : faceRightYaw + 180f;
@@ -113,31 +96,7 @@ namespace Proto.Player
             animator.CrossFadeInFixedTime("Idle", 0.2f);
         }
 
-        void OnMineProgress(float p)
-        {
-            bool mining = p >= 0f;
-            if (animator != null)
-            {
-                animator.SetBool(Mining, mining);
-                // 곡괭이질은 늘 머리 위로 드는 데서 시작한다
-                if (mining && !_mining && animator.layerCount > MineLayer) animator.Play("MineSwing", MineLayer, 0f);
-            }
-            _mining = mining;
-            ShowTool(mining);
-        }
-
-        /// <summary>채굴 중엔 칼을 넣고 곡괭이를 꺼낸다.</summary>
-        void ShowTool(bool mining)
-        {
-            if (tool == null) return;   // 곡괭이가 없으면 칼을 그대로 둔다
-            if (weapon != null && weapon.activeSelf == mining) weapon.SetActive(!mining);
-            if (tool.activeSelf != mining) tool.SetActive(mining);
-        }
-
         bool _down;
-        bool _mining;
-        float _mineWeight;
-        const int MineLayer = 1;
 
         /// <summary>
         /// 쓰러진 뒤 재시작하면 체력이 다시 채워진다. 그때 Death 상태에서 빠져나올 길이
@@ -154,10 +113,7 @@ namespace Proto.Player
         void OnDied()
         {
             _down = true;
-            _mining = false;
-            ShowTool(false);
             if (animator == null) return;
-            animator.SetBool(Mining, false);
             animator.SetTrigger(Dead);
         }
     }

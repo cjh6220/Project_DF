@@ -29,99 +29,106 @@ MonoBehaviour:
   backdropDepth: 31
   sunColor: {r: 1, g: 0.62, b: 0.9, a: 1}
   borderTrees:
-  - {fileID: 916309780705889579, guid: fba5d8f5cc1ccb54fae4440244df8764, type: 3}
-  - {fileID: 6103288261136130859, guid: 362e76c6e1231d54fb8eb9d8df180ecb, type: 3}
-  - {fileID: 7931352401279070473, guid: 0f2980df34fec30458371b0cd049eaff, type: 3}
-  - {fileID: 1437728933917089522, guid: 6445f2030723091418b4516c61e47ebb, type: 3}
-  - {fileID: 4716059581474355636, guid: cb10b2eaeeea8564a8c4aaa5e3d10015, type: 3}
-  - {fileID: 2198532698984072747, guid: 0c2f1fb509b67014bbd7626f123123d4, type: 3}
+  - {fileID: 5288973999631522200, guid: 14ff39317f4199f43998be49e5ec3814, type: 3}
+  - {fileID: 4833166515679836632, guid: a952b208611cceb419b213ad3acb2221, type: 3}
+  - {fileID: 6692274827967615771, guid: 98fedae911216cd41bd3909ef9d3736b, type: 3}
+  - {fileID: 6263752429130618536, guid: 714f1376d3f03db49a649465a69a674d, type: 3}
+  - {fileID: 5822410957484945341, guid: 95e15f60a61cc78429fdd6d87ff12514, type: 3}
+  - {fileID: 3903840399151679679, guid: 6d4a5c5d392c64c4d80c30ceb2b697a6, type: 3}
   borderRows: 3
   borderSpacing: 6.5
   borderRowGap: 7.5
   borderScale: {x: 1.3, y: 2.1}
   exitGapHalfWidth: 3.4
   sideTrees:
-  - {fileID: 8344812684785681657, guid: 94e885b6370879d4b97d92a3a398cf88, type: 3}
-  - {fileID: 8653058259786766523, guid: 59477c4414698cb4c9156907fb4eb8b5, type: 3}
-  - {fileID: 611679142868818857, guid: 3c8772670f7f8e9478fa577f8630b365, type: 3}
-  - {fileID: 456080593599590587, guid: efc7a503e3eb4184696ee0d06e92cec9, type: 3}
-  - {fileID: 7128514309847616957, guid: 8ed271ede4d98614ca3d515abde2a696, type: 3}
-  - {fileID: 6273790534982105145, guid: e6db463228364744e88abe29f1c17333, type: 3}
+  - {fileID: 982810598123609667, guid: b166a89b0a9777d439d8dad7bf028fff, type: 3}
+  - {fileID: 3648407785984372135, guid: 4e151f3a988424946b9cee9ff3ed7dd6, type: 3}
+  - {fileID: 1352828927447989182, guid: 73661655dce17a14a8cef66e9f8d2b01, type: 3}
+  - {fileID: 3197927555263648422, guid: 18afdf6dd7a873b4c825f2fdf66cbd54, type: 3}
+  - {fileID: 9112381741973711596, guid: 17e06515d18c094478831c8e6cf8c139, type: 3}
+  - {fileID: 3900178983809918697, guid: 6b23a210f4585524b81efbc85453982f, type: 3}
   sideTreeScale: {x: 0.9, y: 1.4}
   sideSpacing: 3.2
   borderFill:
-  - {fileID: 3687889715272500597, guid: e4bb1a93e0e00b64ab87d67600b73962, type: 3}
-  - {fileID: 1624934613708217177, guid: 135cfa328d7fcb14abf14ee831d9d7d2, type: 3}
-  - {fileID: 6736833054944385561, guid: deb087d15eddeb04294d349af3bd2c72, type: 3}
-  - {fileID: 6522480445163838556, guid: 6d58392d0b7c5a44a82040de4cdf5f68, type: 3}
-  - {fileID: 8862360825952428780, guid: 13b23f35e616a8b45be94a4b9164bcb4, type: 3}
-  - {fileID: 3042831833515112434, guid: e54b5da67e1b90f4e91949ca516a50ae, type: 3}
+  - {fileID: 5284246044260264689, guid: f2112d1c78324e94da85cb0b9e60d60c, type: 3}
+  - {fileID: 2778234691885195858, guid: 914de56e067b3ed468bd41a588086db7, type: 3}
+  - {fileID: 42930153505199578, guid: 5fa9d65a755263942bd22a42fca5c2ab, type: 3}
+  - {fileID: 3542122250424847724, guid: 190ef39e62aded44caa13539ccf11b86, type: 3}
+  - {fileID: 7261407594849347142, guid: a6a904e353afccc4f966b330b3093da4, type: 3}
+  - {fileID: 7158474602637258141, guid: 82ced1daf0d9b3e49b52d942ec49c0b0, type: 3}
   borderFillCount: 52
   borderFillScale: {x: 1.3, y: 2.6}
   openCameraSide: 1
   lowBorder:
-  - {fileID: 4114360615481746648, guid: 71715a5082fc03548a75f67b89faf87b, type: 3}
-  - {fileID: 1774784216726157110, guid: d9b0ea3d8b855e64e90499c5d5981ac7, type: 3}
-  - {fileID: 3816031292510350962, guid: 2ae467c0e5884e34eb2cf44d3defd2d0, type: 3}
-  - {fileID: 3445003256888115320, guid: 17ecc69fedc732d4b96ab4722d7dd95f, type: 3}
-  - {fileID: 7008611168773017741, guid: 3d3d834937d9f3a49b4c07f06f6f51b9, type: 3}
-  - {fileID: 9051000660223849285, guid: 1b6a25e2b4b751440bcaca922acf586f, type: 3}
-  - {fileID: 2172011278761168382, guid: 68b2ea95dbcf0794e8c3adbd84732e2f, type: 3}
-  - {fileID: 1702921548647229704, guid: 689fac6d74d3c14489caa0b674eed348, type: 3}
+  - {fileID: 94764092209607514, guid: a132a080de5dfbc4d9aea2a58424cf8f, type: 3}
+  - {fileID: 8975201563606136998, guid: 4e79b6b08f18b3b479f6d943da810a67, type: 3}
+  - {fileID: 2800638235409221762, guid: aeacb68cb1b761746a1df9f12b2e48a9, type: 3}
+  - {fileID: 4762311163825937303, guid: deeb231c60cfc7c41aec0865c6fba94a, type: 3}
+  - {fileID: 595231157230521638, guid: a1cd7a0e286d7b3488a46989fd045680, type: 3}
+  - {fileID: 3131386079541332837, guid: 4dc3710747673d4438d7b26ed6efe1a2, type: 3}
+  - {fileID: 8081252143882373621, guid: 37a3d32dcb005bc47a1e258d4bed0c5b, type: 3}
+  - {fileID: 6611130090689793764, guid: 62255e2c2abaaa44d8f3953ec8b96e88, type: 3}
   lowBorderCount: 38
   lowBorderScale: {x: 0.7, y: 1.2}
   sideBorderOutset: 4
   enemyModels:
-  - {fileID: 1356782923155146, guid: c4fa44d6ad133e0409f10009615a9247, type: 3}
-  - {fileID: 1356782923155146, guid: fc9ece646c03b5d4f8c2d3adfb6ffa0e, type: 3}
-  - {fileID: 1827545206396254, guid: b18f11080da58d0449ec9da835a6123a, type: 3}
-  - {fileID: 1962661241923896, guid: e0e6ac992a860c4468d220dfdd803cab, type: 3}
+  - {fileID: 2199368999813188731, guid: 235b01c9181a8ff4fa00cdf81fda429c, type: 3}
+  - {fileID: 2199368999813188731, guid: 235b01c9181a8ff4fa00cdf81fda429c, type: 3}
+  - {fileID: 2656157825817240656, guid: 01565c5c16b8be3489ae43053e072516, type: 3}
+  - {fileID: 8720691786597705081, guid: ad8dd080bf01be04aa37dc70b3fb83c0, type: 3}
+  - {fileID: 4305534603045474387, guid: 855088da26065504fad2d48c762301e2, type: 3}
   championModels:
-  - {fileID: 1791417161093438, guid: 57a429f4b3b3c754e975b792ed61d63a, type: 3}
-  - {fileID: 1390276149824892, guid: c5e7161780bfc06459e1d0fd1cefd777, type: 3}
+  - {fileID: 7696440672363242071, guid: d240e9c9ed1c5bc4bbb167d97f3e52d5, type: 3}
+  - {fileID: 4434719383852126789, guid: b8c03e0f00d40f041be90067c3d101d4, type: 3}
   bossModel: {fileID: 1390276149824892, guid: 01653bbcfb6a45a4fb274560c93f7f96, type: 3}
   bossScale: 2.3
   bossName: "\uAC80\uC740 \uAC08\uAE30"
   bossTitle: "\uADE0\uC5F4\uC758 \uAD70\uC8FC"
-  doorModel: {fileID: 919132149155446097, guid: 46e25b4c5ec319f498a4281eb7ae0997, type: 3}
+  bossSkills: 07000000020000000500000006000000
+  eliteSkills:
+  - model: {fileID: 7696440672363242071, guid: d240e9c9ed1c5bc4bbb167d97f3e52d5, type: 3}
+    skills: 0200000003000000
+  - model: {fileID: 4434719383852126789, guid: b8c03e0f00d40f041be90067c3d101d4, type: 3}
+    skills: 0700000005000000
+  doorModel: {fileID: 6318608879931003129, guid: be1b36cb2e6ee334a95f60942de21a4e, type: 3}
   doorHeight: 3.6
   obstacles:
-  - {fileID: 3832213103267475035, guid: bcda1cecb7a274e48843641935bf94e4, type: 3}
-  - {fileID: 76070903422821017, guid: b9e03015ec91cac449e083e014a76285, type: 3}
-  - {fileID: 3323295607162297903, guid: 9c8b69b96c765d5439819038006c66e7, type: 3}
-  - {fileID: 7187215478541737847, guid: 8b1eff394d4e2fb4f8027a5432db268a, type: 3}
-  - {fileID: 1682626670734166464, guid: e529dc60b53072145befec85a6a3b992, type: 3}
-  - {fileID: 2169970752678888458, guid: 0c86551f289361b4bb5a36359b587bcd, type: 3}
-  - {fileID: 9200203776841007179, guid: 5e740e992a47e4c4cb543fc38957abdd, type: 3}
-  - {fileID: 6875554777847518614, guid: 15faea41d3651ab40b056fa1c4a78b5f, type: 3}
-  - {fileID: 8146235398950860467, guid: 4a6bc99c1b919034c95e6827c53f0e6c, type: 3}
-  - {fileID: 4153502148593233343, guid: de2d09b271cfb144ab19747dc1626af1, type: 3}
-  - {fileID: 4731041251265943480, guid: 802993c0a67c1474a8e45bec6ae1a495, type: 3}
-  - {fileID: 4159993300826327241, guid: 5f7dbd80b21547d4b858ab33922e2740, type: 3}
-  - {fileID: 8264468213022692365, guid: 369456f238c2221498ccdf16df24b160, type: 3}
+  - {fileID: 5934889217169930376, guid: 027a9b735dc2d804aba194cdaa2e62c2, type: 3}
+  - {fileID: 4949156842766099076, guid: 1f8e2c9ef31ac514aa521a12cd9f703d, type: 3}
+  - {fileID: 6315136414700463077, guid: a442396c177725a4e83e375cc4c133dd, type: 3}
+  - {fileID: 6623766368352218983, guid: 6c073a5a76138e741981f1bad87f3654, type: 3}
+  - {fileID: 7752373929388346557, guid: eba094381c095a64988f587d7e59b7d9, type: 3}
+  - {fileID: 4199763963637104270, guid: e02f89d8db329b145bb96bd2c924d29a, type: 3}
+  - {fileID: 4730907180783455851, guid: 4e61d78c5569eb14a9608b2e44f60665, type: 3}
+  - {fileID: 791723459523178211, guid: f460824a8ba53644fa35b5ef5cff705b, type: 3}
+  - {fileID: 901169610578075663, guid: d7bc7e46fc679d1459349f1b1093bae3, type: 3}
+  - {fileID: 1794019714243416811, guid: d847dc6334bfd2f4c9faf0870146008d, type: 3}
+  - {fileID: 1638664683855451482, guid: c941bf96ca08d354fbec86f0d9e0061e, type: 3}
+  - {fileID: 8564398201330919656, guid: de8110bab9f0515468dd47f28cc68740, type: 3}
+  - {fileID: 2773074273731764825, guid: 1e476696bfe23364c9df4075c51e8749, type: 3}
   bigObstacles:
-  - {fileID: 1000011506362536, guid: 9427ec3486e894940ae4503059700080, type: 3}
-  - {fileID: 2456701532441760096, guid: 523f80a8e8777514f960f6cb18eca1a2, type: 3}
-  - {fileID: 6104115542328774656, guid: 6c06c79f3145dc24f9eada4ab7f83d0b, type: 3}
-  - {fileID: 3709593487142597857, guid: 993e5e0f19ece574b95d47ffad714daf, type: 3}
+  - {fileID: 776636463285500160, guid: d266f313f28e08b4793a365575317217, type: 3}
+  - {fileID: 9079549012947428700, guid: 1a1e8a11fb0aded45b0354b22ec6927c, type: 3}
+  - {fileID: 7558880825890956854, guid: 27fe09b21f36d0749b1c00eba5674549, type: 3}
+  - {fileID: 2439843166152327077, guid: f2095fdf01925f94aa859b3982d87485, type: 3}
   bigObstacleSize: 3
   obstacleCount: {x: 1, y: 3}
   obstacleScale: {x: 0.7, y: 1.2}
   obstacleClearFromEntry: 4.5
   clutter:
-  - {fileID: 602624818818653857, guid: d612f6a8366b16945939d1cf3ef5ae37, type: 3}
-  - {fileID: 7468072279062072092, guid: fffba91942c50aa4a8e8455edade1bfd, type: 3}
-  - {fileID: 3832090617687085814, guid: 33fd26760d9e0744882bcc652ba86ae0, type: 3}
-  - {fileID: 5630956397587417040, guid: f07f0fce7694d274fb027cef0a819442, type: 3}
-  - {fileID: 6109376910720859291, guid: 65c8119ca413f1d4387389e844fde9dd, type: 3}
-  - {fileID: 2192684222416585685, guid: 44ffa484624ba6e4384927e2bb2d1e7a, type: 3}
-  - {fileID: 1702921548647229704, guid: 689fac6d74d3c14489caa0b674eed348, type: 3}
-  - {fileID: 8359377368601381781, guid: 334cf5a393551de42bcbe840720fa6b2, type: 3}
-  - {fileID: 7032201976474117930, guid: 7191b86395be0104bbefbf6f3353943b, type: 3}
-  - {fileID: 7800149648210378539, guid: 5f1c70eed4873ab4894814f35de56c2f, type: 3}
-  - {fileID: 555696721079192986, guid: e5715f6e52abb8149b1f3ddfa3cd8dd3, type: 3}
-  - {fileID: 6902929124157160549, guid: 8c4f34aaf3e4a77488c3288a5e57d03d, type: 3}
-  - {fileID: 8624716481360381009, guid: 63a6e7732bfd46c4cb07eb82f1a0d5f8, type: 3}
+  - {fileID: 6320661706986085130, guid: efa9edce650628a4e997e21431569220, type: 3}
+  - {fileID: 3883661859155237312, guid: dbf51408b6aa6b244a7734fa0af5314d, type: 3}
+  - {fileID: 609617703762560358, guid: 29200c2b3014ebc4bb449e9d8605c674, type: 3}
+  - {fileID: 5340610565953673884, guid: ccb2e0a48f94bcd48a66c807c6f0cb1e, type: 3}
+  - {fileID: 7909217478554570481, guid: 1983f083a8b275a46ae2e586b4c0582e, type: 3}
+  - {fileID: 6200394194757312394, guid: b1cc006d51583b74288d1de0fe0fc855, type: 3}
+  - {fileID: 3772535762446215562, guid: ed40e53c3beb4074bb3ca4f76a00860a, type: 3}
+  - {fileID: 7906148829455103494, guid: 9f3d7b46df89c2d46bca5f75d24c6161, type: 3}
+  - {fileID: 1905796728503054175, guid: ed72c3f721f230a4998d949c9039a974, type: 3}
+  - {fileID: 3553934395142938177, guid: b40be8fc0ae114143b59aa65ed716c22, type: 3}
+  - {fileID: 202928664998852379, guid: a19993d6ae9d40a479792119d2fa59dc, type: 3}
+  - {fileID: 8589698413273256357, guid: d50cc098484d49045a689da99c4a8d21, type: 3}
+  - {fileID: 9148891783293626625, guid: 92df0cce3c3c04442b7089599f24ad7e, type: 3}
   clutterCount: {x: 16, y: 24}
   clutterScale: {x: 0.6, y: 1}
   clutterClumps: 5

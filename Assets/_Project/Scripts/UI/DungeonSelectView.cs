@@ -86,6 +86,7 @@ namespace Proto.UI
             transform.SetAsLastSibling();
             _closing = false;
             _openedAt = Time.unscaledTime;
+            UiFocus.Block(this, () => this != null && IsOpen);   // 닫히면(SetActive false) 저절로 풀린다
 
             for (int i = 0; i < _cards.Count; i++) Fill(i);
             _sel = Mathf.Clamp(start, 0, Mathf.Max(0, _list.Length - 1));
@@ -101,6 +102,7 @@ namespace Proto.UI
         {
             StopAllCoroutines();
             _root.gameObject.SetActive(false);
+            UiFocus.Unblock(this);
         }
 
         void Cancel()
@@ -428,6 +430,7 @@ namespace Proto.UI
             }
             _root.gameObject.SetActive(false);
             _closing = false;
+            UiFocus.Unblock(this);
             then?.Invoke();
         }
 

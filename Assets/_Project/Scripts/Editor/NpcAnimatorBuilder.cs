@@ -27,11 +27,16 @@ namespace Proto.EditorTools
         {
             For(NpcRole.Growth);
             For(NpcRole.Skill);
+            For(NpcRole.Smith);
             AssetDatabase.SaveAssets();
         }
 
         public static RuntimeAnimatorController For(NpcRole role)
         {
+            if (role == NpcRole.Smith)
+                return Build("Npc_Smith",
+                    Clip(People + "Common_Animations/Common_Animation_Set.fbx", "Standing_Idle"),
+                    Clip(People + "Common_Animations/Common_Animation_Set.fbx", "Standing_Talking"));
             if (role == NpcRole.Growth)
                 return Build("Npc_Elder",
                     Clip(People + "In Place/Wizard/Wizard_Idle.anim", "Wizard_Idle"),

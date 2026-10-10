@@ -173,6 +173,7 @@ namespace Proto.UI
 
             var t = Text(img.transform, "Label", label, fontSize);
             Stretch(t.rectTransform);
+            img.gameObject.AddComponent<FocusMarker>();   // 키보드 · 패드로 고르면 금색 테
             return b;
         }
 
@@ -267,20 +268,16 @@ namespace Proto.UI
         public static string Name(ResourceId id) => id switch
         {
             ResourceId.Gold => "골드",
-            ResourceId.Ore => "원석",
-            ResourceId.Crystal => "결정",
-            ResourceId.Alien => "이질체",
             ResourceId.Essence => "정수",
+            ResourceId.Dust => "장비 가루",
             _ => "핵"
         };
 
         public static Color ResourceColor(ResourceId id) => id switch
         {
             ResourceId.Gold => new Color(1f, 0.85f, 0.35f),
-            ResourceId.Ore => new Color(0.80f, 0.72f, 0.62f),
-            ResourceId.Crystal => new Color(0.55f, 0.85f, 1f),
-            ResourceId.Alien => new Color(0.75f, 1f, 0.55f),
             ResourceId.Essence => new Color(1f, 0.55f, 0.55f),
+            ResourceId.Dust => new Color(0.62f, 0.86f, 0.95f),
             _ => new Color(1f, 0.6f, 1f)
         };
     }

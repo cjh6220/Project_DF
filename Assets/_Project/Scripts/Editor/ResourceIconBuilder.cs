@@ -7,19 +7,19 @@ using TMPro;
 namespace Proto.EditorTools
 {
     /// <summary>
-    /// 재화 아이콘 6종을 TextMeshPro 스프라이트 에셋으로 묶는다.
-    /// 그러면 모든 글자 안에 &lt;sprite name="ore"&gt; 처럼 아이콘을 끼워 넣을 수 있다.
+    /// 재화 아이콘 4종(골드 · 정수 · 핵 · 장비 가루)을 TextMeshPro 스프라이트 에셋으로 묶는다.
+    /// 그러면 모든 글자 안에 &lt;sprite name="gold"&gt; 처럼 아이콘을 끼워 넣을 수 있다.
     /// 기본 스프라이트 에셋으로 등록하므로 텍스트마다 따로 설정할 필요가 없다.
     ///
     /// 원본: Assets/_Project/Resources/Icons/res_*.png (128x128)
     /// </summary>
     public static class ResourceIconBuilder
     {
-        static readonly string[] Names = { "gold", "ore", "crystal", "alien", "essence", "core" };
+        static readonly string[] Names = { "gold", "essence", "core", "dust" };
         const string SrcDir = "Assets/_Project/Resources/Icons";
         const string AtlasPath = "Assets/_Project/Sprites/ResourceIcons.png";
         const string AssetPath = "Assets/_Project/Resources/Sprite Assets/ResourceIcons.asset";
-        const int Cell = 128, Cols = 3, Rows = 2;
+        const int Cell = 128, Cols = 2, Rows = 2;
 
         [MenuItem("Proto/Build Resource Icons")]
         public static void Build()
@@ -47,7 +47,7 @@ namespace Proto.EditorTools
             ti.alphaIsTransparency = true;
             ti.mipmapEnabled = false;
             ti.isReadable = false;
-            ti.npotScale = TextureImporterNPOTScale.None;   // 384x256 그대로 — 늘이면 아이콘 칸이 어긋난다
+            ti.npotScale = TextureImporterNPOTScale.None;   // 256x256 그대로 — 늘이면 아이콘 칸이 어긋난다
             ti.textureCompression = TextureImporterCompression.Uncompressed;
             ti.SaveAndReimport();
             var tex = AssetDatabase.LoadAssetAtPath<Texture2D>(AtlasPath);

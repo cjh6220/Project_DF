@@ -1,0 +1,264 @@
+using UnityEngine;
+using Proto.Core;
+
+namespace Proto.Dungeon
+{
+    /// <summary>
+    /// 떨어진 장비의 빛기둥 — 디아블로식. 전부 파티클이고 등급 색으로 물든다.
+    ///
+    ///   기둥     세로로 선 빛 (카메라 쪽을 보며 좌우로만 돈다). 여러 장이 겹쳐 숨 쉬듯 흔들린다
+    ///   흐름     기둥 안쪽의 가는 빛줄기가 깜빡이며 위로 번진다 (희귀 이상)
+    ///   반짝이   발밑 원에서 피어올라 위로 떠오른다
+    ///   바닥빛   발밑에 깔리는 둥근 빛
+    ///   마법진   천천히 도는 바닥 고리 (영웅 · 전설)
+    ///   번쩍임   땅에 닿는 순간 가로 섬광 + 반짝이 터짐 (희귀 이상)
+    ///
+    /// 그림: Resources/Fx/Loot/Mat_* (Proto ▸ Build Loot Beam FX가 텍스처로 만든다 — 검은 바탕 흰 그림, 가산 합성)
+    /// 그림만 바꾸려면 같은 이름의 png를 Resources/Fx/Loot에 덮어쓰고 메뉴를 한 번 더 누르면 된다.
+    /// </summary>
+    public class LootBeam : MonoBehaviour
+    {
+        struct Look
+        {
+            public float H, W, Alpha, Sparkle, Glow;
+            public bool Column, Streak, Ring, Burst;
+        }
+
+        static Look For(Rarity r) => r switch
+        {
+            Rarity.Common    => new Look { Column = false, Glow = 0.7f, Sparkle = 0f, Alpha = 0.35f },
+            Rarity.Uncommon  => new Look { Column = true, H = 1.6f, W = 0.32f, Alpha = 0.40f, Sparkle = 3f, Glow = 0.9f },
+            Rarity.Rare      => new Look { Column = true, H = 2.8f, W = 0.45f, Alpha = 0.55f, Sparkle = 7f, Glow = 1.2f, Streak = true, Burst = true },
+            Rarity.Epic      => new Look { Column = true, H = 4.2f, W = 0.60f, Alpha = 0.70f, Sparkle = 12f, Glow = 1.6f, Streak = true, Ring = true, Burst = true },
+            _                => new Look { Column = true, H = 6.0f, W = 0.80f, Alpha = 0.85f, Sparkle = 20f, Glow = 2.1f, Streak = true, Ring = true, Burst = true },
+        };
+
+        ParticleSystem[] _loops;
+        ParticleSystem _flare, _pop;
+        Look _look;
+        bool _on;
+
+        static Material _mBeam, _mStreak, _mGlow, _mSparkle, _mRing, _mFlare;
+
+        public static LootBeam Create(Transform parent, Rarity rarity)
+        {
+            var go = new GameObject("LootBeam");
+            go.transform.SetParent(parent, false);
+            var b = go.AddComponent<LootBeam>();
+            b.Build(rarity);
+            return b;
+        }
+
+        static Material M(ref Material cache, string name)
+        {
+            if (cache == null) cache = Resources.Load<Material>("Fx/Loot/" + name);
+            return cache;
+        }
+
+        void Build(Rarity r)
+        {
+            _look = For(r);
+            var c = ItemDb.RarityColor(r);
+            var list = new System.Collections.Generic.List<ParticleSystem>();
+
+            if (_look.Column)
+            {
+                // 기둥 — 세 장이 겹치며 밝기 · 폭이 흔들린다
+                var col = Make("Column", M(ref _mBeam, "Mat_Beam"), ParticleSystemRenderMode.VerticalBillboard);
+                var m = col.main;
+                m.startLifetime = 1.4f;
+                m.startSize3D = true;
+                m.startSizeX = new ParticleSystem.MinMaxCurve(_look.W * 0.85f, _look.W * 1.15f);
+                m.startSizeY = _look.H; m.startSizeZ = 1f;
+                m.startColor = Tint(c, _look.Alpha);
+                m.maxParticles = 6;
+                var e = col.emission; e.rateOverTime = 2.6f;
+                Fade(col, 0.25f, 0.7f);
+                col.GetComponent<ParticleSystemRenderer>().pivot = new Vector3(0f, 0.5f, 0f);   // 아래 끝이 바닥에
+                list.Add(col);
+
+                // 기둥 아래쪽을 더 밝게 — 짧고 넓은 한 장
+                var foot = Make("ColumnFoot", M(ref _mBeam, "Mat_Beam"), ParticleSystemRenderMode.VerticalBillboard);
+                m = foot.main;
+                m.startLifetime = 1.2f;
+                m.startSize3D = true;
+                m.startSizeX = _look.W * 2.2f; m.startSizeY = _look.H * 0.35f; m.startSizeZ = 1f;
+                m.startColor = Tint(c, _look.Alpha * 0.7f);
+                m.maxParticles = 4;
+                e = foot.emission; e.rateOverTime = 2f;
+                Fade(foot, 0.3f, 0.6f);
+                foot.GetComponent<ParticleSystemRenderer>().pivot = new Vector3(0f, 0.5f, 0f);
+                list.Add(foot);
+            }
+
+            if (_look.Streak)
+            {
+                // 흐름 — 가는 빛줄기가 깜빡이며 위로 늘어난다
+                var st = Make("Streak", M(ref _mStreak, "Mat_Streak"), ParticleSystemRenderMode.VerticalBillboard);
+                var m = st.main;
+                m.startLifetime = new ParticleSystem.MinMaxCurve(0.5f, 0.9f);
+                m.startSize3D = true;
+                m.startSizeX = new ParticleSystem.MinMaxCurve(_look.W * 0.4f, _look.W * 0.8f);
+                m.startSizeY = new ParticleSystem.MinMaxCurve(_look.H * 0.6f, _look.H * 1.05f);
+                m.startSizeZ = 1f;
+                m.startColor = Tint(Color.Lerp(c, Color.white, 0.35f), _look.Alpha);
+                m.maxParticles = 12;
+                var e = st.emission; e.rateOverTime = 6f;
+                var sh = st.shape; sh.enabled = true; sh.shapeType = ParticleSystemShapeType.Box; sh.scale = new Vector3(_look.W * 0.3f, 0f, _look.W * 0.3f);
+                var sz = st.sizeOverLifetime; sz.enabled = true; sz.separateAxes = true;
+                sz.x = new ParticleSystem.MinMaxCurve(1f, AnimationCurve.Linear(0f, 1f, 1f, 0.6f));
+                sz.y = new ParticleSystem.MinMaxCurve(1f, AnimationCurve.EaseInOut(0f, 0.4f, 1f, 1f));
+                Fade(st, 0.2f, 0.5f);
+                st.GetComponent<ParticleSystemRenderer>().pivot = new Vector3(0f, 0.5f, 0f);
+                list.Add(st);
+            }
+
+            // 바닥빛 — 둥글게 깔린다
+            {
+                var g = Make("Glow", M(ref _mGlow, "Mat_Glow"), ParticleSystemRenderMode.HorizontalBillboard);
+                var m = g.main;
+                m.startLifetime = 1.6f;
+                m.startSize = new ParticleSystem.MinMaxCurve(_look.Glow * 0.9f, _look.Glow * 1.1f);
+                m.startColor = Tint(c, Mathf.Min(1f, _look.Alpha + 0.15f));
+                m.maxParticles = 4;
+                var e = g.emission; e.rateOverTime = 2f;
+                Fade(g, 0.3f, 0.6f);
+                g.transform.localPosition = new Vector3(0f, 0.03f, 0f);
+                list.Add(g);
+            }
+
+            if (_look.Sparkle > 0f)
+            {
+                // 반짝이 — 발밑 원에서 떠오른다
+                var sp = Make("Sparkles", M(ref _mSparkle, "Mat_Sparkle"), ParticleSystemRenderMode.Billboard);
+                var m = sp.main;
+                m.startLifetime = new ParticleSystem.MinMaxCurve(0.8f, 1.6f);
+                m.startSize = new ParticleSystem.MinMaxCurve(0.08f, 0.2f);
+                m.startColor = new ParticleSystem.MinMaxGradient(Tint(c, 1f), Tint(Color.white, 1f));
+                m.maxParticles = 60;
+                var e = sp.emission; e.rateOverTime = _look.Sparkle;
+                var sh = sp.shape; sh.enabled = true; sh.shapeType = ParticleSystemShapeType.Circle;
+                sh.radius = Mathf.Max(0.25f, _look.W * 0.9f); sh.rotation = new Vector3(90f, 0f, 0f);
+                var v = sp.velocityOverLifetime; v.enabled = true; v.space = ParticleSystemSimulationSpace.Local;
+                v.x = new ParticleSystem.MinMaxCurve(0f, 0f);
+                v.y = new ParticleSystem.MinMaxCurve(0.8f, 0.8f + _look.H * 0.45f);
+                v.z = new ParticleSystem.MinMaxCurve(0f, 0f);
+                var n = sp.noise; n.enabled = true; n.strength = 0.25f; n.frequency = 1.2f;
+                var sz = sp.sizeOverLifetime; sz.enabled = true;
+                sz.size = new ParticleSystem.MinMaxCurve(1f, AnimationCurve.EaseInOut(0f, 1f, 1f, 0f));
+                Fade(sp, 0.1f, 0.6f);
+                list.Add(sp);
+            }
+
+            if (_look.Ring)
+            {
+                // 마법진 — 바닥에서 천천히 돈다
+                var rg = Make("Ring", M(ref _mRing, "Mat_Ring"), ParticleSystemRenderMode.HorizontalBillboard);
+                var m = rg.main;
+                m.startLifetime = 3f;
+                m.startSize = _look.Glow * 1.3f;
+                m.startRotation = new ParticleSystem.MinMaxCurve(0f, Mathf.PI * 2f);
+                m.startColor = Tint(c, _look.Alpha * 0.8f);
+                m.maxParticles = 2;
+                var e = rg.emission; e.rateOverTime = 0.6f;
+                var rot = rg.rotationOverLifetime; rot.enabled = true; rot.z = new ParticleSystem.MinMaxCurve(0.6f);
+                var sz = rg.sizeOverLifetime; sz.enabled = true;
+                sz.size = new ParticleSystem.MinMaxCurve(1f, AnimationCurve.Linear(0f, 0.85f, 1f, 1.05f));
+                Fade(rg, 0.25f, 0.65f);
+                rg.transform.localPosition = new Vector3(0f, 0.04f, 0f);
+                list.Add(rg);
+            }
+
+            if (_look.Burst)
+            {
+                // 땅에 닿는 순간 — 가로 섬광
+                _flare = Make("Flare", M(ref _mFlare, "Mat_Flare"), ParticleSystemRenderMode.Billboard);
+                var m = _flare.main;
+                m.loop = false; m.playOnAwake = false;
+                m.startLifetime = 0.45f;
+                m.startSize3D = true;
+                m.startSizeX = _look.H * 0.9f; m.startSizeY = _look.H * 0.22f; m.startSizeZ = 1f;
+                m.startColor = Tint(Color.Lerp(c, Color.white, 0.4f), 1f);
+                var e = _flare.emission; e.rateOverTime = 0f; e.SetBursts(new[] { new ParticleSystem.Burst(0f, 1) });
+                var sz = _flare.sizeOverLifetime; sz.enabled = true;
+                sz.size = new ParticleSystem.MinMaxCurve(1f, AnimationCurve.EaseInOut(0f, 0.3f, 1f, 1.2f));
+                Fade(_flare, 0.05f, 0.4f);
+                _flare.transform.localPosition = new Vector3(0f, 0.4f, 0f);
+
+                // 반짝이 터짐
+                _pop = Make("Pop", M(ref _mSparkle, "Mat_Sparkle"), ParticleSystemRenderMode.Billboard);
+                m = _pop.main;
+                m.loop = false; m.playOnAwake = false;
+                m.startLifetime = new ParticleSystem.MinMaxCurve(0.4f, 0.9f);
+                m.startSpeed = new ParticleSystem.MinMaxCurve(1.5f, 3.5f);
+                m.startSize = new ParticleSystem.MinMaxCurve(0.1f, 0.25f);
+                m.startColor = new ParticleSystem.MinMaxGradient(Tint(c, 1f), Tint(Color.white, 1f));
+                m.gravityModifier = 0.6f;
+                e = _pop.emission; e.rateOverTime = 0f; e.SetBursts(new[] { new ParticleSystem.Burst(0f, (short)(8 + 4 * (int)r)) });
+                var sh = _pop.shape; sh.enabled = true; sh.shapeType = ParticleSystemShapeType.Hemisphere; sh.radius = 0.2f; sh.rotation = new Vector3(-90f, 0f, 0f);
+                Fade(_pop, 0.05f, 0.5f);
+                _pop.transform.localPosition = new Vector3(0f, 0.3f, 0f);
+            }
+
+            _loops = list.ToArray();
+            foreach (var ps in _loops) ps.Stop(true, ParticleSystemStopBehavior.StopEmittingAndClear);
+        }
+
+        /// <summary>기둥을 켜고 끈다 (날아가는 동안은 끈다).</summary>
+        public void Show(bool on)
+        {
+            if (_on == on || _loops == null) return;
+            _on = on;
+            foreach (var ps in _loops)
+            {
+                if (on) ps.Play(true);
+                else ps.Stop(true, ParticleSystemStopBehavior.StopEmittingAndClear);
+            }
+        }
+
+        /// <summary>땅에 닿는 순간 한 번.</summary>
+        public void Burst()
+        {
+            if (_flare != null) _flare.Play(true);
+            if (_pop != null) _pop.Play(true);
+        }
+
+        // ───────────────────────────── 도구 ─────────────────────────────
+
+        ParticleSystem Make(string name, Material mat, ParticleSystemRenderMode mode)
+        {
+            var go = new GameObject(name);
+            go.transform.SetParent(transform, false);
+            var ps = go.AddComponent<ParticleSystem>();
+            ps.Stop(true, ParticleSystemStopBehavior.StopEmittingAndClear);
+            var m = ps.main;
+            m.loop = true;
+            m.playOnAwake = false;
+            m.startSpeed = 0f;
+            m.simulationSpace = ParticleSystemSimulationSpace.Local;
+            m.scalingMode = ParticleSystemScalingMode.Hierarchy;
+            var sh = ps.shape; sh.enabled = false;
+            var r = go.GetComponent<ParticleSystemRenderer>();
+            r.renderMode = mode;
+            r.sharedMaterial = mat;
+            r.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+            r.receiveShadows = false;
+            r.alignment = ParticleSystemRenderSpace.View;
+            if (mode == ParticleSystemRenderMode.HorizontalBillboard) r.alignment = ParticleSystemRenderSpace.World;
+            return ps;
+        }
+
+        static Color Tint(Color c, float a) => new Color(c.r, c.g, c.b, a);
+
+        /// <summary>나타났다 사라지는 알파 곡선 — inAt까지 차오르고 outAt부터 사라진다.</summary>
+        static void Fade(ParticleSystem ps, float inAt, float outAt)
+        {
+            var col = ps.colorOverLifetime;
+            col.enabled = true;
+            var g = new Gradient();
+            g.SetKeys(new[] { new GradientColorKey(Color.white, 0f), new GradientColorKey(Color.white, 1f) },
+                      new[] { new GradientAlphaKey(0f, 0f), new GradientAlphaKey(1f, inAt), new GradientAlphaKey(1f, outAt), new GradientAlphaKey(0f, 1f) });
+            col.color = new ParticleSystem.MinMaxGradient(g);
+        }
+    }
+}

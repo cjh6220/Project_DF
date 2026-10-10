@@ -355,7 +355,7 @@ namespace Proto.Feel
 
         // ─────────────────────────────── 데미지 숫자 ───────────────────────────────
 
-        public enum NumberKind { Normal, Kill, Player, Info }
+        public enum NumberKind { Normal, Kill, Player, Info, Crit }
 
         /// <summary>숫자가 아닌 짧은 알림 ("그로기!", "분노!").</summary>
         public void Popup(Vector3 pos, string text)
@@ -376,7 +376,9 @@ namespace Proto.Feel
 
             var cam = cameraRoot != null ? cameraRoot : (Camera.main != null ? Camera.main.transform : null);
             pos += new Vector3(Random.Range(-0.25f, 0.25f), Random.Range(0f, 0.2f), 0f);
-            n.Show(pos, Mathf.RoundToInt(amount).ToString(), kind, cam != null ? cam.rotation : Quaternion.identity);
+            string txt = Mathf.RoundToInt(amount).ToString();
+            if (kind == NumberKind.Crit) txt += "!";   // 치명타
+            n.Show(pos, txt, kind, cam != null ? cam.rotation : Quaternion.identity);
         }
 
         // ─────────────────────────────── 효과음 ───────────────────────────────

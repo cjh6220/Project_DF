@@ -49,21 +49,6 @@ namespace Proto.Data
         [Tooltip("몬스터끼리의 최소 간격. 뭉쳐 있으면 한 방에 다 맞는다.")]
         public float enemySpawnSpacing = 3.0f;
 
-        [Tooltip("본 경로 방의 광맥 수 (적게)")]
-        public Vector2Int oresOnMainPath = new Vector2Int(0, 1);
-
-        [Tooltip("가지 방의 광맥 수 (많이) — 우회로에 보상을 몰아준다")]
-        public Vector2Int oresOnBranch = new Vector2Int(2, 3);
-
-        [Header("── 채굴 ──")]
-        [Tooltip("광맥 1회 채굴에 걸리는 시간")]
-        public float mineDuration = 2.5f;
-
-        [Tooltip("피격 시 채굴 진행도를 얼마나 유지하는가 (0=전부 잃음, 1=유지)")]
-        [Range(0f, 1f)] public float mineProgressKeptOnHit = 0f;
-
-        public float mineRange = 2.2f;
-
         [Header("── 플레이어 ──")]
         public float moveSpeed = 6.5f;
         [Tooltip("걷기 속도 — 방향키를 한 번 누르면 걷는다. 두 번 연속이면 moveSpeed로 달린다.")]
@@ -73,6 +58,13 @@ namespace Proto.Data
         public float attackCooldown = 0.38f;
         public float attackRange = 2.0f;
         public float attackArcDegrees = 110f;
+
+        [Tooltip("치명타 확률 (0~1). 장비 · 성장이 더한다.")]
+        [Range(0f, 1f)] public float critChance = 0.05f;
+        [Tooltip("치명타 추가 피해 (0.5 = 1.5배)")]
+        public float critDamage = 0.5f;
+        [Tooltip("받는 피해 감소 (0~1). 장비가 더한다.")]
+        [Range(0f, 1f)] public float damageReduction = 0f;
 
         [Tooltip("버튼을 누르고 판정이 들어가기까지. 무기가 몸 앞을 지나는 순간에 맞춘다.\n" +
                  "Attack1(베기) 모션 기준. 애니메이션 속도를 바꾸면 같이 바꿔야 한다.")]

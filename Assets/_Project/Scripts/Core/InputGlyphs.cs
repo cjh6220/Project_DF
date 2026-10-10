@@ -1,6 +1,6 @@
 namespace Proto.Core
 {
-    public enum Act { Attack, Skill, Mine, Interact, Cancel, Menu, Chord, Pan, Zoom, Navigate }
+    public enum Act { Attack, Skill, Interact, Cancel, Menu, Chord, Pan, Zoom, Navigate, PagePrev, PageNext, AltA, AltB, Inventory }
 
     /// <summary>
     /// 화면에 띄우는 버튼 표시. 지금 쓰는 장치(키보드 / PS / Xbox)에 맞춰 바뀐다.
@@ -72,12 +72,16 @@ namespace Proto.Core
                     {
                         case Act.Attack: return PsSquare;
                         case Act.Skill: return PsTriangle;
-                        case Act.Mine: case Act.Interact: return PsCross;
+                        case Act.Interact: return PsCross;
                         case Act.Cancel: return PsCircle;
                         case Act.Menu: return Icon("ps_options", Text("OPTIONS"));
                         case Act.Chord: return Icon("ps_r1", Text("R1"));
                         case Act.Pan: return Icon("ps_rs", Text("R스틱"));
                         case Act.Zoom: return Icon("ps_l2", Text("L2")) + Icon("ps_r2", "/" + Text("R2"));
+                        case Act.PagePrev: return Icon("ps_l1", Text("L1"));
+                        case Act.PageNext: return Icon("ps_r1", Text("R1"));
+                        case Act.AltA: return Text("R3");
+                        case Act.AltB: case Act.Inventory: return Text("공유");
                         default: return Icon("ps_dpad", Text("십자키"));
                     }
                 case InputScheme.Xbox:
@@ -85,12 +89,16 @@ namespace Proto.Core
                     {
                         case Act.Attack: return XbX;
                         case Act.Skill: return XbY;
-                        case Act.Mine: case Act.Interact: return XbA;
+                        case Act.Interact: return XbA;
                         case Act.Cancel: return XbB;
                         case Act.Menu: return Icon("xb_menu", Text("Menu"));
                         case Act.Chord: return Icon("xb_rb", Text("RB"));
                         case Act.Pan: return Icon("xb_rs", Text("R스틱"));
                         case Act.Zoom: return Icon("xb_lt", Text("LT")) + Icon("xb_rt", "/" + Text("RT"));
+                        case Act.PagePrev: return Icon("xb_lb", Text("LB"));
+                        case Act.PageNext: return Icon("xb_rb", Text("RB"));
+                        case Act.AltA: return Text("R3");
+                        case Act.AltB: case Act.Inventory: return Icon("xb_view", Text("View"));
                         default: return Icon("xb_dpad", Text("십자키"));
                     }
                 default:
@@ -98,12 +106,16 @@ namespace Proto.Core
                     {
                         case Act.Attack: return Key(GameInput.KeyLabel(GameInput.Attack, 0));
                         case Act.Skill: return Key(GameInput.KeyLabel(GameInput.Skill, 0));
-                        case Act.Mine: return Key(GameInput.KeyLabel(GameInput.Mine, 0));
                         case Act.Interact: return Key(GameInput.KeyLabel(GameInput.Interact, 0));
                         case Act.Cancel: case Act.Menu: return Key("Esc");
                         case Act.Chord: return "";
                         case Act.Pan: return Text("드래그");
                         case Act.Zoom: return Text("휠");
+                        case Act.PagePrev: return Key("Q");
+                        case Act.PageNext: return Key("E");
+                        case Act.AltA: return Key("R");
+                        case Act.AltB: return Key("Tab");
+                        case Act.Inventory: return Key("I");
                         default: return Text("방향키");
                     }
             }
@@ -119,7 +131,7 @@ namespace Proto.Core
                 default:
                 {
                     var r = GameInput.Rebindables();
-                    return Key(GameInput.KeyLabel(r[8 + i].Action, r[8 + i].Index));
+                    return Key(GameInput.KeyLabel(r[7 + i].Action, r[7 + i].Index));
                 }
             }
         }

@@ -65,7 +65,7 @@ namespace Proto.Enemy
 
         void Build()
         {
-            _w = (_ec != null && _ec.IsChampion) ? championWidth : width;
+            _w = _ec != null && _ec.IsGuardian ? championWidth * 1.5f : (_ec != null && _ec.IsChampion) ? championWidth : width;
 
             _root = new GameObject("HPBar").transform;
             _root.SetParent(transform, false);

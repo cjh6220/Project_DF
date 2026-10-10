@@ -8,23 +8,19 @@ using Proto.Data;
 namespace Proto.Enemy
 {
     /// <summary>
-    /// 스테이지 보스 — 1스테이지 '실버백'.
+    /// 스테이지 보스. 늘 슈퍼아머 — 밀리지도 끊기지도 않는다.
+    /// 대신 모든 공격에 바닥 예고가 있고, 피하는 방법이 스킬마다 다르다.
     ///
-    /// 일반 몬스터와 달리 늘 슈퍼아머다. 밀리지도 끊기지도 않는다.
-    /// 대신 모든 공격에 바닥 예고가 있고, 피하는 방법이 패턴마다 다르다.
-    ///
-    ///   휘두르기  가까이 붙으면. 앞쪽 직사각형 → 옆(깊이)으로 비키거나 뒤로 뺀다
-    ///   돌진      플레이어와 같은 줄로 옮겨 선 뒤 가로로 끝까지 달린다
-    ///             → 줄(깊이)을 바꿔 피한다. 벽에 박으면 그로기 — 딜 타임
-    ///   내려찍기  가슴을 두드린 뒤 주변 원 → 원 밖으로 나간다
+    /// 쓰는 스킬은 StageTheme.bossSkills (보통 4개) — 스킬 자체는 MonsterSkills에 있고 엘리트와 같이 쓴다.
+    /// 지금 거리에서 쓸 수 있는 스킬 중 재사용이 끝난 것을 고르고, 같은 스킬만 반복하지 않는다.
+    /// 쓸 게 없으면 걸어서 다가간다.
     ///
     ///   체력 50% 이하 → 포효하고 분노. 예고가 짧아지고 돌진을 두 번 한다
-    ///
-    /// 그로기 동안은 받는 피해가 늘어난다. "피하고 → 때린다"의 리듬이 여기서 나온다.
+    ///   돌진이 벽에 박히면 그로기 — 받는 피해가 늘어난다. "피하고 → 때린다"의 리듬이 여기서 나온다.
     /// </summary>
     [RequireComponent(typeof(CharacterController))]
     [RequireComponent(typeof(Health))]
-    public class BossController : MonoBehaviour
+    public class BossController : MonoBehaviour, IMonsterBody
     {
         public static BossController Current { get; private set; }
         public static event Action<BossController> Spawned;
@@ -38,6 +34,8 @@ namespace Proto.Enemy
         public bool IsGroggy => Time.time < _groggyUntil;
         public Health Health => _hp;
 
+        static readonly MonsterSkillId[] DefaultSkills = { MonsterSkillId.Swipe, MonsterSkillId.Charge, MonsterSkillId.Slam };
+
         TuningConfig _cfg;
         Transform _player;
         Health _playerHp;
@@ -50,8 +48,10 @@ namespace Proto.Enemy
         float _groggyUntil;
         Vector3 _face = Vector3.left;
         readonly List<Telegraph> _telegraphs = new List<Telegraph>();
+        MonsterSkillId[] _skills = DefaultSkills;
+        readonly Dictionary<MonsterSkillId, float> _readyAt = new();
 
-        float Tempo => Phase2 ? _cfg.bossPhase2Tempo : 1f;
+        float TempoValue => Phase2 ? _cfg.bossPhase2Tempo : 1f;
 
         void Awake()
         {
@@ -87,6 +87,17 @@ namespace Proto.Enemy
             StartCoroutine(Brain());
         }
 
+        /// <summary>쓸 스킬 — 테마에서 고른다. 비어 있으면 휘두르기 · 돌진 · 내려찍기.</summary>
+        /// <summary>붙어 있는 모델 (외곽선을 두를 때 쓴다).</summary>
+        public Transform ModelRoot => _model;
+
+        public void SetSkills(MonsterSkillId[] skills)
+        {
+            var list = new List<MonsterSkillId>();
+            if (skills != null) foreach (var s in skills) if (s != MonsterSkillId.None && !list.Contains(s)) list.Add(s);
+            _skills = list.Count > 0 ? list.ToArray() : DefaultSkills;
+        }
+
         void SetModel(GameObject prefab)
         {
             if (prefab == null) return;
@@ -112,12 +123,12 @@ namespace Proto.Enemy
 
         IEnumerator Brain()
         {
-            // 등장 — 가슴을 두드리며 이름을 알린다. 이 동안은 때리지 않는다.
+            // 등장 — 포효하며 이름을 알린다. 이 동안은 때리지 않는다.
             FacePlayer(true);
-            Play("ChestHit", 1f);
+            Anim("ChestHit", 1f);
             yield return new WaitForSeconds(_cfg.bossIntro);
 
-            int last = -1;
+            var last = MonsterSkillId.None;
             while (!_hp.IsDead)
             {
                 if (!Phase2 && _hp.Current <= _hp.Max * _cfg.bossPhase2At)
@@ -126,161 +137,56 @@ namespace Proto.Enemy
                     continue;
                 }
 
-                float d = FlatDistance();
-                int pick;
-                if (d <= _cfg.bossSwipeRange * 0.85f) pick = UnityEngine.Random.value < 0.6f ? 0 : 2;
-                else if (d <= 6f) pick = UnityEngine.Random.value < 0.45f ? 1 : -1;
-                else pick = 1;
-
-                // 같은 패턴만 반복하지 않게
-                if (pick == last && pick != -1 && UnityEngine.Random.value < 0.6f)
-                    pick = pick == 1 ? -1 : 1;
-
-                switch (pick)
+                var pick = Pick(last);
+                if (pick == MonsterSkillId.None)
                 {
-                    case 0: yield return Swipe(); break;
-                    case 1:
-                        yield return Charge();
-                        if (Phase2 && !_hp.IsDead) yield return Charge();   // 분노하면 연속 돌진
-                        break;
-                    case 2: yield return Slam(); break;
-                    default: yield return Approach(1.4f); break;
+                    yield return Approach(1.2f);
+                    continue;
                 }
-                if (pick != -1) last = pick;
+
+                yield return MonsterSkills.Run(pick, this);
+                if (Phase2 && pick == MonsterSkillId.Charge && !_hp.IsDead)
+                    yield return MonsterSkills.Run(pick, this);   // 분노하면 연속 돌진
+                _readyAt[pick] = Time.time + MonsterSkills.Cooldown(pick) / TempoValue;
+                last = pick;
 
                 if (_hp.IsDead) yield break;
-                Play("Idle", 1f);
-                yield return new WaitForSeconds(_cfg.bossRecover / Tempo);
+                Anim("Idle", 1f);
+                yield return new WaitForSeconds(_cfg.bossRecover / TempoValue);
             }
+        }
+
+        /// <summary>쓸 수 있는 스킬 중 가중치로 하나. 방금 쓴 건 덜 고른다.</summary>
+        MonsterSkillId Pick(MonsterSkillId last)
+        {
+            float total = 0f;
+            var w = new float[_skills.Length];
+            for (int i = 0; i < _skills.Length; i++)
+            {
+                var s = _skills[i];
+                if (_readyAt.TryGetValue(s, out var t) && Time.time < t) continue;
+                w[i] = MonsterSkills.Weight(s, this) * (s == last ? 0.35f : 1f);
+                total += w[i];
+            }
+            if (total <= 0f) return MonsterSkillId.None;
+            float r = UnityEngine.Random.value * total;
+            for (int i = 0; i < _skills.Length; i++) { r -= w[i]; if (w[i] > 0f && r <= 0f) return _skills[i]; }
+            return MonsterSkillId.None;
         }
 
         /// <summary>플레이어 쪽으로 걸어간다. 휘두르기 거리에 들어오면 멈춘다.</summary>
         IEnumerator Approach(float maxTime)
         {
-            Play("Walk", 1.2f);
+            Anim("Walk", 1.2f);
             float t = 0f;
             while (t < maxTime && !_hp.IsDead && FlatDistance() > _cfg.bossSwipeRange * 0.75f)
             {
                 var to = ToPlayer();
-                Move(to.normalized * _cfg.bossMoveSpeed * Tempo * Time.deltaTime);
+                Move(to.normalized * _cfg.bossMoveSpeed * TempoValue * Time.deltaTime);
                 Face(to);
                 t += Time.deltaTime;
                 yield return null;
             }
-        }
-
-        /// <summary>앞쪽 직사각형. 가까이 붙은 플레이어를 벌한다.</summary>
-        IEnumerator Swipe()
-        {
-            FacePlayer(true);
-            Vector3 fwd = _face;
-            float windup = _cfg.bossSwipeWindup / Tempo;
-            var tg = Track(Telegraph.Rect(transform.position, fwd, _cfg.bossSwipeRange, _cfg.bossSwipeWidth, windup));
-            // 휘두르는 모션의 타격 지점(약 40%)이 예고 끝에 오도록 속도를 맞춘다
-            Play("Attack", 0.65f / windup);
-            yield return new WaitForSeconds(windup);
-            Untrack(tg);
-            if (_hp.IsDead) yield break;
-
-            if (InRect(transform.position, fwd, _cfg.bossSwipeRange, _cfg.bossSwipeWidth))
-                HitPlayer(_cfg.bossSwipeDamage, 1.0f);
-            Shake(fwd, 0.8f);
-            yield return new WaitForSeconds(0.35f);
-        }
-
-        /// <summary>
-        /// 같은 줄로 옮겨 선 뒤 가로로 끝까지 달린다.
-        /// 벨트스크롤의 핵심 회피(깊이 이동)를 요구하는 패턴이다.
-        /// </summary>
-        IEnumerator Charge()
-        {
-            // 1) 줄 맞추기 — 플레이어와 같은 깊이로 빠르게 옮겨 선다
-            Play("Walk", 1.8f);
-            float t = 0f;
-            while (t < 0.9f && !_hp.IsDead)
-            {
-                float dz = _player.position.z - transform.position.z;
-                if (Mathf.Abs(dz) < 0.15f) break;
-                Move(new Vector3(0f, 0f, Mathf.Sign(dz) * Mathf.Min(Mathf.Abs(dz), 8f * Time.deltaTime)));
-                t += Time.deltaTime;
-                yield return null;
-            }
-            if (_hp.IsDead) yield break;
-
-            // 2) 예고 — 가로 줄 전체가 붉게 칠해진다
-            float dir = Mathf.Sign(_player.position.x - transform.position.x);
-            if (dir == 0f) dir = 1f;
-            Vector3 fwd = new Vector3(dir, 0f, 0f);
-            Face(fwd);
-            float edgeX = _center.x + dir * (_half.x - 0.6f);
-            float length = Mathf.Max(1f, Mathf.Abs(edgeX - transform.position.x));
-            float windup = _cfg.bossChargeWindup / Tempo;
-            var tg = Track(Telegraph.Rect(transform.position, fwd, length, _cfg.bossChargeWidth, windup));
-            Play("Idle", 2.5f);   // 몸을 낮추고 숨을 고르는 느낌 — 빠르게 들썩인다
-            yield return new WaitForSeconds(windup);
-            Untrack(tg);
-            if (_hp.IsDead) yield break;
-
-            // 3) 돌진
-            Play("Run", 1.8f);
-            bool hit = false;
-            float speed = _cfg.bossChargeSpeed * Tempo;
-            while (!_hp.IsDead && (edgeX - transform.position.x) * dir > 0.05f)
-            {
-                float step = Mathf.Min(speed * Time.deltaTime, Mathf.Abs(edgeX - transform.position.x));
-                Move(fwd * step);
-                if (!hit)
-                {
-                    var p = _player.position;
-                    if (Mathf.Abs(p.z - transform.position.z) <= _cfg.bossChargeWidth * 0.5f &&
-                        Mathf.Abs(p.x - transform.position.x) <= 1.3f)
-                    {
-                        HitPlayer(_cfg.bossChargeDamage, 1.4f);
-                        hit = true;   // 한 번만 맞는다
-                    }
-                }
-                yield return null;
-            }
-            if (_hp.IsDead) yield break;
-
-            // 4) 벽에 박는다 → 그로기. 피한 보상으로 딜 타임을 준다
-            Shake(fwd, 1.6f);
-            if (Proto.Feel.Feel.I != null)
-            {
-                Proto.Feel.Feel.I.HitStop(1.2f);
-                Proto.Feel.Feel.I.Popup(transform.position + Vector3.up * (_cc.height * transform.localScale.y + 0.4f), "그로기!");
-            }
-            _groggyUntil = Time.time + _cfg.bossGroggyTime;
-            Groggy?.Invoke();
-            Play("Idle", 0.35f);
-            yield return new WaitForSeconds(_cfg.bossGroggyTime);
-        }
-
-        /// <summary>가슴을 두드리고 주변을 내려찍는다.</summary>
-        IEnumerator Slam()
-        {
-            FacePlayer(true);
-            float windup = _cfg.bossSlamWindup / Tempo;
-            var tg = Track(Telegraph.Circle(transform.position, _cfg.bossSlamRadius, windup));
-            Play("ChestHit", 1.3f);
-            yield return new WaitForSeconds(windup);
-            Untrack(tg);
-            if (_hp.IsDead) yield break;
-
-            Play("Attack", 2.2f);
-            if (FlatDistance() <= _cfg.bossSlamRadius) HitPlayer(_cfg.bossSlamDamage, 1.2f);
-            Shake(Vector3.up, 1.8f);
-            if (Proto.Feel.Feel.I != null)
-            {
-                Proto.Feel.Feel.I.HitStop(1.3f);
-                // 땅이 터지는 느낌 — 사방으로 흙먼지
-                for (int i = 0; i < 6; i++)
-                {
-                    var dir = Quaternion.Euler(0f, i * 60f, 0f) * Vector3.forward;
-                    Proto.Feel.Feel.I.Spark(transform.position + dir * _cfg.bossSlamRadius * 0.6f + Vector3.up * 0.2f, dir, true);
-                }
-            }
-            yield return new WaitForSeconds(0.5f);
         }
 
         IEnumerator Enrage()
@@ -288,12 +194,49 @@ namespace Proto.Enemy
             Phase2 = true;
             Enraged?.Invoke();
             ClearTelegraphs();
-            Play("ChestHit", 1.2f);
-            Shake(Vector3.up, 1.4f);
+            Anim("ChestHit", 1.2f);
+            if (Proto.Feel.Feel.I != null) Proto.Feel.Feel.I.Shake(Vector3.up, 1.4f);
             Tint(new Color(1f, 0.62f, 0.58f));
             if (Proto.Feel.Feel.I != null)
-                Proto.Feel.Feel.I.Popup(transform.position + Vector3.up * (_cc.height * transform.localScale.y + 0.4f), "분노!");
+                Proto.Feel.Feel.I.Popup(transform.position + Vector3.up * HeadHeight, "분노!");
             yield return new WaitForSeconds(1.4f);
+        }
+
+        // ───────────────────────────── IMonsterBody ─────────────────────────────
+
+        public Transform Root => transform;
+        public Transform Player => _player;
+        public TuningConfig Cfg => _cfg;
+        public float Tempo => TempoValue;
+        public float Reach => 1f;
+        public float Power => 1f;
+        public bool Stopped => _hp.IsDead;
+        public Vector3 ArenaCenter => _center;
+        public Vector2 ArenaHalf => _half;
+        public float HeadHeight => _cc.height * transform.localScale.y + 0.4f;
+
+        public void Anim(string state, float speed) => Play(state, speed);
+        public Telegraph Track(Telegraph t) { _telegraphs.Add(t); return t; }
+        public void Untrack(Telegraph t) { _telegraphs.Remove(t); }
+
+        public void HitPlayer(float dmg, float shake)
+        {
+            if (_playerHp == null || _playerHp.IsDead) return;
+            _playerHp.TakeDamage(dmg, transform.position);
+            if (Proto.Feel.Feel.I != null) Proto.Feel.Feel.I.HitStop(0.8f);
+        }
+
+        /// <summary>돌진이 벽에 박혔다 → 그로기. 피한 보상으로 딜 타임을 준다.</summary>
+        public void Stagger(float seconds)
+        {
+            if (Proto.Feel.Feel.I != null)
+            {
+                Proto.Feel.Feel.I.HitStop(1.2f);
+                Proto.Feel.Feel.I.Popup(transform.position + Vector3.up * HeadHeight, "그로기!");
+            }
+            _groggyUntil = Time.time + seconds;
+            Groggy?.Invoke();
+            Play("Idle", 0.35f);
         }
 
         // ───────────────────────────── 피격 · 사망 ─────────────────────────────
@@ -319,25 +262,6 @@ namespace Proto.Enemy
 
         // ───────────────────────────── 도구 ─────────────────────────────
 
-        void HitPlayer(float dmg, float shake)
-        {
-            if (_playerHp == null || _playerHp.IsDead) return;
-            _playerHp.TakeDamage(dmg, transform.position);
-            if (Proto.Feel.Feel.I != null) Proto.Feel.Feel.I.HitStop(0.8f);
-        }
-
-        void Shake(Vector3 dir, float scale)
-        {
-            if (Proto.Feel.Feel.I != null) Proto.Feel.Feel.I.Shake(dir, scale);
-            Proto.Feel.Haptics.Pulse(0.22f * scale, 0.32f * scale, 0.12f + 0.06f * scale);   // 보스 내려찍기 · 돌진 — 흔들림만큼
-        }
-
-        bool InRect(Vector3 origin, Vector3 fwd, float length, float width)
-        {
-            var local = Quaternion.Inverse(Quaternion.LookRotation(fwd)) * (_player.position - origin);
-            return local.z >= -0.5f && local.z <= length && Mathf.Abs(local.x) <= width * 0.5f;
-        }
-
         Vector3 ToPlayer()
         {
             var to = _player.position - transform.position;
@@ -355,7 +279,7 @@ namespace Proto.Enemy
             if (snap && _model != null) _model.rotation = Quaternion.LookRotation(_face);
         }
 
-        void Face(Vector3 dir)
+        public void Face(Vector3 dir)
         {
             dir.y = 0f;
             if (dir.sqrMagnitude > 0.0001f) _face = dir.normalized;
@@ -368,7 +292,7 @@ namespace Proto.Enemy
         }
 
         /// <summary>방 밖으로 나가지 않게 가둔다.</summary>
-        void Move(Vector3 delta)
+        public void Move(Vector3 delta)
         {
             _cc.Move(delta);
             var p = transform.position;
@@ -415,9 +339,6 @@ namespace Proto.Enemy
                 r.SetPropertyBlock(block);
             }
         }
-
-        Telegraph Track(Telegraph t) { _telegraphs.Add(t); return t; }
-        void Untrack(Telegraph t) { _telegraphs.Remove(t); }
 
         void ClearTelegraphs()
         {

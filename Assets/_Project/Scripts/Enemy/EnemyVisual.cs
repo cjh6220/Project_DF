@@ -48,6 +48,22 @@ namespace Proto.Enemy
         float _attackUntil;
         bool _dead;
 
+        // 공중 · 다운 자세 — 바라보는 방향(_face) 위에 젖힘(_tilt) · 눕기(_roll)를 얹는다
+        Quaternion _face = Quaternion.identity;
+        float _tilt, _roll;
+
+        // 띄워졌을 때 바닥에 남는 그림자 — 높이가 눈에 보이게 (해 그림자가 꺼져 있다)
+        SpriteRenderer _shadow;
+        float _groundY = float.NaN;
+        static Sprite _blob;
+        static Material _blobMat;
+
+        // 떠다니는 몬스터 (애니메이터 없는 모델 — 공허의 눈 등): 위아래로 흔들리고, 공격 때 앞으로 들이받는다
+        const float HoverHeight = 0.8f;
+        float _hoverY = HoverHeight, _lunge, _phase;
+        Vector3 _baseScale = Vector3.one;
+        TentacleSway _sway;
+
         void Awake()
         {
             _enemy = GetComponent<EnemyController>();
@@ -73,6 +89,9 @@ namespace Proto.Enemy
         /// 팩이 붙여 둔 이동 스크립트는 끄기만 한다 — 런타임 Destroy는
         /// [RequireComponent] 의존성 때문에 순서를 타서 지저분해진다.
         /// </summary>
+        /// <summary>붙어 있는 모델 (외곽선을 두를 때 쓴다).</summary>
+        public Transform ModelRoot => model;
+
         public void SetModel(GameObject prefab)
         {
             if (prefab == null) return;
@@ -89,6 +108,11 @@ namespace Proto.Enemy
             foreach (var rb in go.GetComponentsInChildren<Rigidbody>(true)) Destroy(rb);
 
             model = go.transform;
+            _face = model.rotation;
+            _baseScale = model.localScale;
+            _sway = go.GetComponentInChildren<TentacleSway>();
+            _phase = Random.value * 6f;
+            _hoverY = HoverHeight;
             animator = go.GetComponentInChildren<Animator>();
             if (animator != null)
             {
@@ -139,7 +163,8 @@ namespace Proto.Enemy
 
         void Update()
         {
-            if (animator == null) return;
+            AirShadow();
+            if (animator == null) { Hover(); return; }
 
             if (!_dead)
             {
@@ -165,15 +190,67 @@ namespace Proto.Enemy
 
             var look = _enemy.LookDirection;
             look.y = 0f;
-            if (look.sqrMagnitude < 0.0001f) return;
+            if (look.sqrMagnitude > 0.0001f)
+                _face = Quaternion.Slerp(_face, Quaternion.LookRotation(look.normalized), turnSpeed * Time.deltaTime);
 
-            model.rotation = Quaternion.Slerp(
-                model.rotation, Quaternion.LookRotation(look.normalized), turnSpeed * Time.deltaTime);
+            // 띄워지면 머리를 젖히며 솟고, 떨어질 땐 앞으로 숙인다. 떨어진 뒤엔 옆으로 눕는다
+            float tT = 0f, rT = 0f;
+            if (_enemy.Airborne) { tT = _enemy.AirVy > 0f ? -38f : Mathf.Lerp(-38f, 25f, Mathf.Clamp01(-_enemy.AirVy / 10f)); rT = 25f; }
+            else if (_enemy.Downed && !_dead) rT = 80f;
+            float dt = Time.deltaTime;
+            _tilt = Mathf.Lerp(_tilt, tT, 1f - Mathf.Exp(-12f * dt));
+            _roll = Mathf.Lerp(_roll, rT, 1f - Mathf.Exp(-14f * dt));
+            model.rotation = _face * Quaternion.Euler(_tilt, 0f, _roll);
+        }
+
+        void AirShadow()
+        {
+            if (_shadow == null)
+            {
+                var go = new GameObject("AirShadow");
+                go.transform.SetParent(transform, false);
+                _shadow = go.AddComponent<SpriteRenderer>();
+                _shadow.sprite = Blob();
+                // 3D 렌더러에선 2D 스프라이트 셰이더가 안 그려진다 — 기본 스프라이트 셰이더로
+                if (_blobMat == null) _blobMat = new Material(Shader.Find("Sprites/Default"));
+                _shadow.sharedMaterial = _blobMat;
+                _shadow.color = new Color(0f, 0f, 0f, 0f);
+                _shadow.sortingOrder = -10;
+            }
+            var p = transform.position;
+            if (!_enemy.Airborne || float.IsNaN(_groundY)) _groundY = p.y;
+            float h = Mathf.Max(0f, p.y - _groundY);
+            float k = Mathf.Clamp01(h / 3f);
+            float a = h > 0.08f ? Mathf.Lerp(0.6f, 0.4f, k) : 0f;
+            var c = _shadow.color; c.a = Mathf.MoveTowards(c.a, a, Time.deltaTime * 4f); _shadow.color = c;
+            float d = (_cc != null ? _cc.radius * 3.4f : 1.4f) * Mathf.Lerp(1f, 0.75f, k) * transform.lossyScale.x;
+            var t = _shadow.transform;
+            t.position = new Vector3(p.x, _groundY + 0.03f, p.z);
+            t.rotation = Quaternion.Euler(90f, 0f, 0f);
+            t.localScale = Vector3.one * (d / Mathf.Max(0.001f, transform.lossyScale.x));
+        }
+
+        static Sprite Blob()
+        {
+            if (_blob != null) return _blob;
+            const int n = 64;
+            var tex = new Texture2D(n, n, TextureFormat.RGBA32, false) { wrapMode = TextureWrapMode.Clamp };
+            for (int y = 0; y < n; y++)
+                for (int x = 0; x < n; x++)
+                {
+                    float r = new Vector2(x - n * 0.5f + 0.5f, y - n * 0.5f + 0.5f).magnitude / (n * 0.5f);
+                    float a = Mathf.Clamp01(1f - r); a = a * a * (3f - 2f * a);
+                    tex.SetPixel(x, y, new Color(1f, 1f, 1f, a));
+                }
+            tex.Apply();
+            _blob = Sprite.Create(tex, new Rect(0, 0, n, n), new Vector2(0.5f, 0.5f), n);
+            return _blob;
         }
 
         void OnAttacked()
         {
-            if (animator == null || _dead) return;
+            if (animator == null) { if (!_dead) { _lunge = 1f; if (_sway != null) _sway.Excite(); } return; }
+            if (_dead) return;
             if (_hasAttackTrigger) animator.SetTrigger("Attack");
             if (_attackState != null) animator.CrossFadeInFixedTime(_attackState, 0.06f, 0);
             if (_hasAttacking)
@@ -186,6 +263,26 @@ namespace Proto.Enemy
         }
 
         /// <summary>맞아서 공격이 끊겼다. 휘두르던 모션을 즉시 접는다.</summary>
+        /// <summary>애니메이션 없는 떠다니는 모델 — 흔들림 · 들이받기 · 죽으면 떨어져 쪼그라든다.</summary>
+        void Hover()
+        {
+            if (model == null) return;
+            float dt = Time.deltaTime;
+            if (_dead)
+            {
+                _hoverY = Mathf.MoveTowards(_hoverY, 0.15f, 4f * dt);
+                model.localScale = Vector3.Lerp(model.localScale, _baseScale * 0.55f, 5f * dt);
+            }
+            else _hoverY = HoverHeight + 0.15f * Mathf.Sin(Time.time * 2.4f + _phase);
+            _lunge = Mathf.Max(0f, _lunge - dt * 2.2f);
+            var fwd = transform.InverseTransformDirection(model.forward);
+            model.localPosition = new Vector3(0f, _hoverY, 0f) + fwd * (0.6f * Mathf.Sin(_lunge * Mathf.PI));
+
+            var look = _enemy.LookDirection; look.y = 0f;
+            if (!_dead && look.sqrMagnitude > 0.0001f)
+                model.rotation = Quaternion.Slerp(model.rotation, Quaternion.LookRotation(look.normalized), turnSpeed * dt);
+        }
+
         void OnAttackCanceled()
         {
             if (animator == null || _dead) return;
@@ -197,7 +294,7 @@ namespace Proto.Enemy
 
         void OnDied()
         {
-            if (animator == null) return;
+            if (animator == null) { _dead = true; if (_sway != null) _sway.Die(); return; }
             _dead = true;
 
             if (_hasWalking) animator.SetBool("isWalking", false);

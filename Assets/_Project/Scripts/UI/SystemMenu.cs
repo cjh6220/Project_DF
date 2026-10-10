@@ -22,7 +22,7 @@ namespace Proto.UI
         public static bool IsOpen { get; private set; }
 
         RectTransform _root, _main, _confirm, _button;
-        Button _continue, _cancel;
+        Button _continue, _cancel, _reset;
         TextMeshProUGUI _buttonLabel, _saveInfo;
         bool _uiWasOpen;   // 지난 프레임에 다른 창이 열려 있었나 — 그 창을 닫은 Esc로 메뉴가 같이 열리지 않게
 
@@ -50,6 +50,7 @@ namespace Proto.UI
             _button.pivot = new Vector2(1f, 1f);
             _button.anchoredPosition = new Vector2(-40f, -40f);
             btn.onClick.AddListener(Open);
+            UiFocus.NoNav(btn);   // 메뉴 안에서 방향키가 바깥 [메뉴] 버튼으로 새지 않게
             _buttonLabel = btn.GetComponentInChildren<TextMeshProUGUI>();
 
             _root = UiKit.Stretch(UiKit.Rect(transform, "SystemMenu"));
@@ -68,7 +69,7 @@ namespace Proto.UI
 
             _continue = MenuButton(_main, "Continue", "계속하기", -120f, UiKit.ButtonKind.Primary, Close);
             MenuButton(_main, "Settings", "설정", -190f, UiKit.ButtonKind.Secondary, OpenSettings);
-            MenuButton(_main, "Reset", "저장 초기화", -260f, UiKit.ButtonKind.Danger, ShowConfirm);
+            _reset = MenuButton(_main, "Reset", "저장 초기화", -260f, UiKit.ButtonKind.Danger, ShowConfirm);
             MenuButton(_main, "Quit", "게임 종료", -330f, UiKit.ButtonKind.Secondary, Quit);
 
             _saveInfo = UiKit.Text(_main, "SaveInfo", "", 17);
@@ -97,7 +98,7 @@ namespace Proto.UI
             var no = UiKit.Button(_confirm, "No", "취소", new Vector2(240f, 54f), 21);
             ((RectTransform)no.transform).anchorMin = ((RectTransform)no.transform).anchorMax = new Vector2(0.5f, 0f);
             ((RectTransform)no.transform).anchoredPosition = new Vector2(128f, 50f);
-            no.onClick.AddListener(ShowMain);
+            no.onClick.AddListener(BackFromConfirm);
             _cancel = no;
         }
 
@@ -122,7 +123,13 @@ namespace Proto.UI
             {
                 if (GameInput.MenuPressed || GameInput.CancelPressed)
                 {
-                    if (_confirm.gameObject.activeSelf) ShowMain(); else Close();
+                    if (_confirm.gameObject.activeSelf) BackFromConfirm(); else Close();
+                }
+                // 빈 곳을 클릭해 선택이 풀려도 방향키가 계속 먹게
+                if (IsOpen)
+                {
+                    bool conf = _confirm.gameObject.activeSelf;
+                    UiFocus.Keep(conf ? _confirm : _main, conf ? _cancel : _continue);
                 }
             }
             else if (GameInput.MenuPressed && !otherUi && !_uiWasOpen)
@@ -151,6 +158,7 @@ namespace Proto.UI
             IsOpen = false;
             _root.gameObject.SetActive(false);
             Select(null);
+            UiFocus.MarkClosed();   // 닫은 키로 마을 NPC 대화가 같이 열리지 않게
             Time.timeScale = 1f;
         }
 
@@ -165,6 +173,13 @@ namespace Proto.UI
             _main.gameObject.SetActive(true);
             _confirm.gameObject.SetActive(false);
             Select(_continue.gameObject);
+        }
+
+        /// <summary>초기화 확인에서 돌아오면 커서를 [저장 초기화]에 둔다 — 어디서 왔는지 잃지 않게.</summary>
+        void BackFromConfirm()
+        {
+            ShowMain();
+            Select(_reset.gameObject);
         }
 
         void ShowConfirm()

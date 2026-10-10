@@ -1,0 +1,260 @@
+#if UNITY_EDITOR
+using System.Collections.Generic;
+using System.IO;
+using System.Text;
+using UnityEditor;
+using UnityEngine;
+
+namespace Proto.EditorTools
+{
+    /// <summary>
+    /// 카타나 체력 · 피로도 막대 그림을 만든다. 메뉴: Proto ▸ Build Katana HUD
+    ///
+    /// 원본 (GPT, Resources/UI):
+    ///   KatanaFrame.png   칼 전체 (홈이 가늘게 파여 있음)
+    ///   KatanaFill.png    삼각형 면 무늬 띠 (흰색)
+    /// 만드는 것 (Resources/UI):
+    ///   KatanaBlade.png   홈을 칼날 폭의 ~65%로 넓힌 칼 (홈은 어두운 단색)
+    ///   KatanaGroove.png  넓힌 홈 모양 그대로의 채움 (흰색 면 무늬 — 코드가 빨강 · 노랑으로 칠한다)
+    ///   KatanaHalo.png    칼날 둘레 빛 (경고 맥박용, 사방으로 Pad만큼 큼)
+    ///   KatanaGroove.txt  홈 정보 — 폭 · 높이 · 시작 · 끝 · 중심선 (런타임이 채움 끝 · 숫자 · 반짝임 위치를 잡는다)
+    /// </summary>
+    public static class KatanaHudBuilder
+    {
+        const string Dir = "Assets/_Project/Resources/UI/";
+        public const int Pad = 40;
+        const int Samples = 96;
+
+        [MenuItem("Proto/Build Katana HUD")]
+        public static void Build()
+        {
+            var src = Load(Dir + "KatanaFrame.png");
+            var fillTex = Load(Dir + "KatanaFill.png");
+            if (src == null || fillTex == null) { Debug.LogWarning("[Katana] KatanaFrame / KatanaFill 없음"); return; }
+
+            int w = src.width, h = src.height;
+            var px = src.GetPixels();
+
+            // 1) 열마다 원래 홈(위아래가 밝은 은색에 끼인 어두운 줄)과 칼날 위아래를 찾는다
+            var origT = new int[w];
+            var gC = new float[w];
+            var bTop = new int[w];
+            var bBot = new int[w];
+            for (int x = 0; x < w; x++)
+            {
+                int best = 0; float bc = 0f;
+                int y = 0;
+                while (y < h)
+                {
+                    if (!Dark(px[y * w + x])) { y++; continue; }
+                    int s = y;
+                    while (y < h && Dark(px[y * w + x])) y++;
+                    int e = y - 1;
+                    // 위아래 3픽셀 바깥이 칼날(불투명 · 너무 어둡지 않음)이어야 홈이다
+                    int sa = s - 3, ea = e + 3;
+                    bool lit = sa >= 0 && ea < h && e - s + 1 <= 80
+                               && px[sa * w + x].a > 0.5f && px[ea * w + x].a > 0.5f
+                               && Lum(px[sa * w + x]) > 0.15f && Lum(px[ea * w + x]) > 0.15f;
+                    if (lit && e - s + 1 > best) { best = e - s + 1; bc = (s + e) * 0.5f; }
+                }
+                origT[x] = best; gC[x] = bc;
+                if (best > 0)
+                {
+                    int c = Mathf.RoundToInt(bc), lo = c, hi = c;
+                    while (lo > 0 && px[(lo - 1) * w + x].a > 0.5f) lo--;
+                    while (hi < h - 1 && px[(hi + 1) * w + x].a > 0.5f) hi++;
+                    bTop[x] = hi; bBot[x] = lo;
+                }
+            }
+
+            // 가장 긴 연속 구간 = 홈 (8픽셀 이하 끊김은 잇는다)
+            int g0 = -1, g1 = -1, run0 = -1, maxT = 0, gap = 0;
+            for (int x = 0; x <= w; x++)
+            {
+                bool hit = x < w && origT[x] >= 2;
+                if (hit) gap = 0; else gap++;
+                bool on = x < w && (hit || (run0 >= 0 && gap <= 8));
+                if (on && run0 < 0) run0 = x;
+                if (!on && run0 >= 0)
+                {
+                    int end = x - 1 - (gap - 1);
+                    if (end - run0 > g1 - g0) { g0 = run0; g1 = end; }
+                    run0 = -1;
+                }
+            }
+            if (g0 < 0) { Debug.LogWarning("[Katana] 홈을 못 찾았다"); return; }
+            for (int x = g0; x <= g1; x++) maxT = Mathf.Max(maxT, origT[x]);
+            // 끊긴 열은 왼쪽 값을 이어 쓴다
+            for (int x = g0 + 1; x <= g1; x++)
+                if (origT[x] == 0) { origT[x] = origT[x - 1]; gC[x] = gC[x - 1]; bTop[x] = bTop[x - 1]; bBot[x] = bBot[x - 1]; }
+
+            // 2) 넓힌 홈 — 칼날 가운데, 위아래 은색 테두리를 남긴다. 끝으로 갈수록 원래 홈처럼 가늘어진다
+            var cy = new float[w];
+            var half = new float[w];
+            for (int x = g0; x <= g1; x++)
+            {
+                float bh = bTop[x] - bBot[x];
+                float rim = Mathf.Max(5f, bh * 0.17f);
+                float taper = Mathf.Clamp01(origT[x] / (maxT * 0.75f));
+                taper = taper * taper * (3f - 2f * taper);
+                cy[x] = (bTop[x] + bBot[x]) * 0.5f;
+                half[x] = Mathf.Max(0f, (bh * 0.5f - rim) * taper);
+            }
+            // 들쭉날쭉 다듬기
+            Smooth(cy, g0, g1, 6); Smooth(half, g0, g1, 6);
+
+            var blade = (Color[])px.Clone();
+            var groove = new Color[w * h];
+            var grooveCol = new Color(0.075f, 0.078f, 0.09f, 1f);
+            for (int x = g0; x <= g1; x++)
+            {
+                float u = (x - g0) / (float)(g1 - g0);
+                // 원래 홈 자리를 먼저 칼날 은색으로 메운다 (넓힌 홈 밖으로 나온 부분)
+                if (origT[x] > 0)
+                {
+                    int c = Mathf.RoundToInt(gC[x]);
+                    int r = origT[x] / 2 + 2;
+                    var silverUp = px[Mathf.Clamp(c + r + 2, 0, h - 1) * w + x];
+                    var silverDn = px[Mathf.Clamp(c - r - 2, 0, h - 1) * w + x];
+                    for (int y = c - r; y <= c + r; y++)
+                    {
+                        if (y < 0 || y >= h) continue;
+                        if (Dark(px[y * w + x])) blade[y * w + x] = y >= c ? silverUp : silverDn;
+                    }
+                }
+                for (int y = Mathf.FloorToInt(cy[x] - half[x] - 1); y <= Mathf.CeilToInt(cy[x] + half[x] + 1); y++)
+                {
+                    if (y < 0 || y >= h) continue;
+                    float d = half[x] + 0.5f - Mathf.Abs(y - cy[x]);
+                    float cov = Mathf.Clamp01(d);
+                    if (cov <= 0f) continue;
+                    int i = y * w + x;
+                    // 홈 — 위쪽 가장자리에 그림자, 아래쪽에 살짝 밝은 선
+                    float vy = (y - (cy[x] - half[x])) / Mathf.Max(1f, half[x] * 2f);
+                    var gc = grooveCol;
+                    if (vy > 0.82f) gc *= 0.6f;
+                    else if (vy < 0.12f) gc = Color.Lerp(gc, new Color(0.30f, 0.31f, 0.35f), 0.5f);
+                    gc.a = 1f;
+                    blade[i] = Color.Lerp(blade[i], gc, cov);
+                    // 채움 — 면 무늬 띠를 홈 모양대로 휘어 붙인다
+                    var f = fillTex.GetPixelBilinear(u, Mathf.Lerp(0.06f, 0.94f, vy));
+                    float lum = Mathf.Lerp(0.72f, 1f, (f.r + f.g + f.b) / 3f);
+                    groove[i] = new Color(lum, lum, lum, cov * Mathf.Clamp01(f.a * 3f + 0.5f));
+                }
+            }
+
+            Save(Dir + "KatanaBlade.png", w, h, blade);
+            Save(Dir + "KatanaGroove.png", w, h, groove);
+
+            // 3) 칼날 둘레 빛 — 칼날 실루엣(홈 시작보다 오른쪽)을 흐리게 번진 뒤 칼날 자체는 비운다
+            int hw = w + Pad * 2, hh = h + Pad * 2;
+            var mask = new float[hw * hh];
+            for (int y = 0; y < h; y++)
+                for (int x = Mathf.Max(0, g0 - 12); x < w; x++)
+                    mask[(y + Pad) * hw + x + Pad] = px[y * w + x].a > 0.5f ? 1f : 0f;
+            var blur = Blur(Blur(mask, hw, hh, 9), hw, hh, 9);
+            var halo = new Color[hw * hh];
+            for (int i = 0; i < halo.Length; i++)
+            {
+                float a = Mathf.Clamp01(blur[i] * 2.4f) * (1f - mask[i]);
+                halo[i] = new Color(1f, 1f, 1f, a);
+            }
+            Save(Dir + "KatanaHalo.png", hw, hh, halo);
+
+            // 4) 홈 정보
+            var sb = new StringBuilder();
+            sb.AppendLine($"{w} {h} {g0} {g1} {Pad}");
+            for (int k = 0; k < Samples; k++)
+            {
+                int x = Mathf.RoundToInt(Mathf.Lerp(g0, g1, k / (Samples - 1f)));
+                sb.AppendLine($"{x} {cy[x]:0.0} {half[x]:0.0} {bTop[x]} {bBot[x]}");
+            }
+            File.WriteAllText(Dir + "KatanaGroove.txt", sb.ToString());
+
+            AssetDatabase.Refresh();
+            foreach (var n in new[] { "KatanaBlade", "KatanaGroove", "KatanaHalo", "KatanaFillTip", "KatanaGleam" })
+                Sprite(Dir + n + ".png", n == "KatanaFillTip" || n == "KatanaGleam" ? 256 : 2048);
+            Debug.Log($"[Katana] 칼 HUD 그림 생성 완료 — 홈 {g0}~{g1} / {w}");
+        }
+
+        static bool Dark(Color c) => c.a > 0.5f && Lum(c) < 0.2f;
+        static float Lum(Color c) => (c.r + c.g + c.b) / 3f;
+
+        static Texture2D Load(string path)
+        {
+            if (!File.Exists(path)) return null;
+            var t = new Texture2D(2, 2, TextureFormat.RGBA32, false);
+            t.LoadImage(File.ReadAllBytes(path));
+            return t;
+        }
+
+        static void Save(string path, int w, int h, Color[] px)
+        {
+            var t = new Texture2D(w, h, TextureFormat.RGBA32, false);
+            t.SetPixels(px);
+            t.Apply();
+            File.WriteAllBytes(path, t.EncodeToPNG());
+            Object.DestroyImmediate(t);
+        }
+
+        static void Sprite(string path, int max)
+        {
+            var imp = AssetImporter.GetAtPath(path) as TextureImporter;
+            if (imp == null) return;
+            imp.textureType = TextureImporterType.Sprite;
+            imp.spriteImportMode = SpriteImportMode.Single;
+            imp.alphaIsTransparency = true;
+            imp.mipmapEnabled = false;
+            imp.wrapMode = TextureWrapMode.Clamp;
+            imp.npotScale = TextureImporterNPOTScale.None;
+            imp.maxTextureSize = max;
+            imp.textureCompression = TextureImporterCompression.Uncompressed;
+            // 투명 테두리를 잘라내지 않는다 — 잘라내면 채움(Filled) 비율이 잘린 범위 기준이 돼 어긋난다
+            var st = new TextureImporterSettings();
+            imp.ReadTextureSettings(st);
+            st.spriteMeshType = SpriteMeshType.FullRect;
+            imp.SetTextureSettings(st);
+            imp.SaveAndReimport();
+        }
+
+        static void Smooth(float[] a, int g0, int g1, int r)
+        {
+            var b = (float[])a.Clone();
+            for (int x = g0; x <= g1; x++)
+            {
+                float s = 0f; int n = 0;
+                for (int k = -r; k <= r; k++) { int i = x + k; if (i < g0 || i > g1) continue; s += b[i]; n++; }
+                a[x] = s / n;
+            }
+        }
+
+        static float[] Blur(float[] src, int w, int h, int r)
+        {
+            var tmp = new float[w * h];
+            var dst = new float[w * h];
+            float inv = 1f / (r * 2 + 1);
+            for (int y = 0; y < h; y++)
+            {
+                float s = 0f;
+                for (int x = -r; x <= r; x++) s += src[y * w + Mathf.Clamp(x, 0, w - 1)];
+                for (int x = 0; x < w; x++)
+                {
+                    tmp[y * w + x] = s * inv;
+                    s += src[y * w + Mathf.Min(x + r + 1, w - 1)] - src[y * w + Mathf.Max(x - r, 0)];
+                }
+            }
+            for (int x = 0; x < w; x++)
+            {
+                float s = 0f;
+                for (int y = -r; y <= r; y++) s += tmp[Mathf.Clamp(y, 0, h - 1) * w + x];
+                for (int y = 0; y < h; y++)
+                {
+                    dst[y * w + x] = s * inv;
+                    s += tmp[Mathf.Min(y + r + 1, h - 1) * w + x] - tmp[Mathf.Max(y - r, 0) * w + x];
+                }
+            }
+            return dst;
+        }
+    }
+}
+#endif

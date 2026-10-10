@@ -4,19 +4,17 @@ using System.Collections.Generic;
 namespace Proto.Core
 {
     /// <summary>
-    /// 자원 6종. 크게 2계열로 나뉘며 각각 다른 성장을 먹인다.
-    ///   채굴 계열 → 더 오래 버틴다 (탐험/채굴/고용)
-    ///   전투 계열 → 더 강해진다 (스킬)
-    /// 이 분리가 게임의 뼈대다. 흐리지 말 것.
+    /// 자원 3종. 골드는 공통, 정수·핵은 전투에서 얻는다.
+    ///   정수 → 일반 몬스터, 탐험 성장
+    ///   핵   → 엘리트/보스, 스킬과 큰 성장
+    ///   가루 → 장비를 분해해서 얻는다. 대장장이가 새 장비를 만든다
     /// </summary>
     public enum ResourceId
     {
         Gold,      // 공통
-        Ore,       // 채굴 — 얕은 방
-        Crystal,   // 채굴 — 깊은 방
-        Alien,     // 채굴 — 희귀
         Essence,   // 전투 — 일반 몬스터
-        Core       // 전투 — 엘리트/보스
+        Core,      // 전투 — 엘리트/보스
+        Dust       // 장비 분해 — 제작 재료
     }
 
     [Serializable]

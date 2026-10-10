@@ -8,7 +8,6 @@ using Proto.Core;
 using Proto.Data;
 using Proto.Dungeon;
 using Proto.Enemy;
-using Proto.Mining;
 using Proto.Player;
 using Proto.UI;
 
@@ -54,7 +53,6 @@ namespace Proto.EditorTools
             BuildFeel(root.transform, cfg, cam.transform.parent);
 
             var enemyPrefab = BuildEnemyTemplate(root.transform);
-            var orePrefab = BuildOreTemplate(root.transform);
             var exitPrefab = BuildExitTemplate(root.transform);
 
             var roomGo = new GameObject("Room");
@@ -63,7 +61,6 @@ namespace Proto.EditorTools
             Set(room, "cfg", cfg);
             Set(room, "contentRoot", arena.transform);
             Set(room, "enemyPrefab", enemyPrefab);
-            Set(room, "orePrefab", orePrefab);
             Set(room, "exitPrefab", exitPrefab);
             Set(room, "decorator", arena.GetComponent<RoomDecorator>());
             Set(room, "telegraphMaterial", TelegraphMaterial());
@@ -114,12 +111,11 @@ namespace Proto.EditorTools
             DungeonBuilder.Wire(village, built.Gate, ui.tree.transform.parent, DungeonBuilder.LoadAll());
 
             enemyPrefab.SetActive(false);
-            orePrefab.SetActive(false);
             exitPrefab.SetActive(false);
 
             Selection.activeGameObject = root;
             Debug.Log("[Proto] 프로토타입 씬 생성 완료. Play를 누르세요.\n" +
-                      "이동 방향키 · 공격 X · 스킬 Z · 채굴 C(누르고 있기) · 대화 Space — 패드도 지원\n" +
+                      "이동 방향키 · 공격 X · 스킬 Z · 대화 Space — 패드도 지원\n" +
                       "가장 먼저 만질 숫자: Tuning.asset 의 staminaDrainPerSecond");
         }
 
@@ -299,28 +295,6 @@ namespace Proto.EditorTools
         /// 쥐는 각도를 눈으로 보면서 맞춰야 하기 때문이다.
         /// 하이어라키에서 소켓만 집어서 돌리면 되고, 손 본은 건드리지 않는다.
         /// </summary>
-        const string ToolPath = "Assets/polyperfect/Low Poly Ultimate Pack/M/- Prefabs_M/Tools_M/pickaxe.prefab";
-
-        /// <summary>
-        /// 채굴용 곡괭이 — 칼과 같은 소켓에 숨겨 둔다. 채굴할 때 PlayerAnimator가 칼과 바꿔 든다.
-        /// 곡괭이 자루(+Y)를 칼날 방향(+Z)으로 눕히고, 자루 끝을 쥐도록 놓는다.
-        /// </summary>
-        public static void AttachTool(Transform socket)
-        {
-            var old = socket.Find("Tool");
-            if (old != null) Object.DestroyImmediate(old.gameObject);
-            var prefab = AssetDatabase.LoadAssetAtPath<GameObject>(ToolPath);
-            if (prefab == null) { Debug.LogWarning("[Proto] 곡괭이 프리팹 없음: " + ToolPath); return; }
-            var tool = (GameObject)PrefabUtility.InstantiatePrefab(prefab, socket);
-            PrefabUtility.UnpackPrefabInstance(tool, PrefabUnpackMode.Completely, InteractionMode.AutomatedAction);
-            tool.name = "Tool";
-            tool.transform.localPosition = new Vector3(0f, 0f, 0.05f);
-            tool.transform.localRotation = Quaternion.Euler(90f, 0f, 0f);
-            tool.transform.localScale = Vector3.one * 1.35f;
-            foreach (var c in tool.GetComponentsInChildren<Collider>(true)) Object.DestroyImmediate(c);
-            tool.SetActive(false);
-        }
-
         public static void AttachWeapon(Animator anim)
         {
             var hand = anim.GetBoneTransform(HumanBodyBones.RightHand);
@@ -350,7 +324,6 @@ namespace Proto.EditorTools
             weapon.transform.localScale = Vector3.one;
             var mat = AssetDatabase.LoadAssetAtPath<Material>(WeaponMaterial);
             if (mat != null) foreach (var r in weapon.GetComponentsInChildren<Renderer>(true)) r.sharedMaterial = mat;
-            AttachTool(socket.transform);
 
             // 무기에 콜라이더가 있으면 플레이어 자신의 공격 판정에 걸린다
             foreach (var c in weapon.GetComponentsInChildren<Collider>(true)) Object.DestroyImmediate(c);
@@ -479,23 +452,6 @@ namespace Proto.EditorTools
             return model;
         }
 
-        static GameObject BuildOreTemplate(Transform parent)
-        {
-            var go = new GameObject("OreTemplate");
-            go.transform.SetParent(parent);
-
-            var crystal = GameObject.CreatePrimitive(PrimitiveType.Cube);
-            crystal.transform.SetParent(go.transform);
-            crystal.transform.localPosition = new Vector3(0f, 0.5f, 0f);
-            crystal.transform.localScale = new Vector3(0.6f, 1.0f, 0.6f);
-            crystal.transform.localRotation = Quaternion.Euler(0f, 45f, 12f);
-            Object.DestroyImmediate(crystal.GetComponent<Collider>());
-
-            var ore = go.AddComponent<OreNode>();
-            Set(ore, "visual", crystal.GetComponent<Renderer>());
-            return go;
-        }
-
         static GameObject BuildExitTemplate(Transform parent)
         {
             var go = new GameObject("ExitTemplate");
@@ -552,14 +508,6 @@ namespace Proto.EditorTools
             var lootText = Text(hudRoot.transform, "LootText",
                 new Vector2(40f, -112f), 20, TextAlignmentOptions.Left);
 
-            var mineRoot = new GameObject("MineBar", typeof(RectTransform));
-            mineRoot.transform.SetParent(hudRoot.transform, false);
-            var mrt = (RectTransform)mineRoot.transform;
-            Anchor(mrt, new Vector2(0.5f, 0.25f), Vector2.zero, new Vector2(320f, 18f));
-            var mineFill = Bar(mineRoot.transform, "MineFill", Vector2.zero,
-                new Vector2(320f, 18f), new Color(0.45f, 0.85f, 1f), true);
-            mineRoot.SetActive(false);
-
             var mapRoot = new GameObject("Minimap", typeof(RectTransform));
             mapRoot.transform.SetParent(hudRoot.transform, false);
             var maprt = (RectTransform)mapRoot.transform;
@@ -581,8 +529,6 @@ namespace Proto.EditorTools
             Set(hud, "player", player);
             Set(hud, "staminaFill", staminaFill);
             Set(hud, "healthFill", healthFill);
-            Set(hud, "mineBarRoot", mineRoot);
-            Set(hud, "mineFill", mineFill);
             Set(hud, "staminaText", staminaText);
             Set(hud, "lootText", lootText);
 

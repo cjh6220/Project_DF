@@ -8,7 +8,7 @@ namespace Proto.UI
     /// 씬 빌더가 HUD를 만든 직후 부르고, 메뉴 Proto ▸ Build Hit FX + UI Sprites 로도 다시 구울 수 있다.
     /// 구워진 테두리·띠는 씬에 저장되므로 하이어라키에서 바로 보이고 손으로 옮길 수 있다.
     ///
-    ///   피로도·체력·채굴 막대  BarFrame(왼쪽 비스듬한 끝) + BarFill(사선 줄무늬, 색은 원래 색을 곱한다)
+    ///   피로도·체력 막대        BarFrame(왼쪽 비스듬한 끝) + BarFill(사선 줄무늬, 색은 원래 색을 곱한다)
     ///   미니맵               MinimapFrame + 유리 바탕
     ///   획득물 줄            InfoStrip(오른쪽으로 사라지는 띠)
     /// 그림이 없으면 아무것도 하지 않는다.
@@ -26,7 +26,6 @@ namespace Proto.UI
 
             Bar(canvas, "StaminaBar", frame, fill);
             Bar(canvas, "HealthBar", frame, fill);
-            Bar(canvas, "MineFill", frame, fill);
             Minimap(canvas);
             LootStrip(canvas);
         }

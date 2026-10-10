@@ -2,7 +2,6 @@ using System;
 using UnityEngine;
 using Proto.Data;
 using Proto.Dungeon;
-using Proto.Mining;
 using Proto.Player;
 
 namespace Proto.Core
@@ -14,8 +13,11 @@ namespace Proto.Core
     ///
     ///   게임 시작 → 마을 → 가운데 문 → 던전 → 귀환(정산) → 마을
     ///
-    ///   입장 → 피로도 가득 → 방 이동/전투/채굴 → 피로도 0 또는 HP 0 → 귀환
-    ///   페널티 없음. 획득물 전부 유지. 그래서 "한 번 더"가 쉽게 나온다.
+    ///   입장 → 피로도 가득 → 방 이동/전투 → 피로도 0 또는 HP 0 → 귀환
+    ///   페널티 없음. 획득물(자원 · 장비) 전부 유지. 그래서 "한 번 더"가 쉽게 나온다.
+    ///
+    ///   장비  일반 몬스터는 낮은 확률로, 보물방 상자는 확정 3개. 바닥에 떨어진 장비는 저절로 날아와 가방에 들어간다.
+    ///         가방이 꽉 차 있으면 줍지 못하고 그 방 바닥에 남는다 (판이 끝나면 사라진다).
     /// </summary>
     public class RunManager : MonoBehaviour
     {
@@ -47,6 +49,12 @@ namespace Proto.Core
         public Stamina Stamina { get; private set; }
         public ResourceWallet RunLoot { get; } = new();
         public ResourceWallet Bank { get; } = new();
+        /// <summary>가방 + 장착 칸. 장비는 주운 순간 가방에 들어간다 (쓰러져도 잃지 않는다).</summary>
+        public Inventory Inventory { get; } = new();
+        /// <summary>이번 판에 주운 장비 — 정산 화면에 보여 줄 목록.</summary>
+        public System.Collections.Generic.List<Item> RunItems { get; } = new();
+        /// <summary>장비를 주웠을 때.</summary>
+        public event Action<Item> ItemLooted;
         public RunPhase Phase { get; private set; } = RunPhase.Idle;
 
         /// <summary>지금(또는 마지막으로) 들어간 던전. 정산의 [다시 들어가기]는 같은 던전으로 간다.</summary>
@@ -96,10 +104,79 @@ namespace Proto.Core
             _playerHealth.Died += () => EndRun("쓰러짐");
 
             room.ExitUsed += OnExitUsed;
-            room.OreMined += OnOreMined;
             room.EnemyKilled += RewardEnemyKill;
+            room.EnemyDiedAt += OnEnemyDiedAt;
+            room.ChestOpened += OnChestOpened;
+            room.PickupHandler = CollectItem;
+            room.HasBagRoom = () => !Inventory.Full;
             room.BossKilled += OnBossKilled;
+
+            // 성장 · 장비가 바뀌면 능력치를 다시 계산한다 (던전 안에서 바꿔도 바로 반영)
+            Progression.Changed += () => { Inventory.BonusCapacity = 5 * Progression.Level(NodeId.BagSpace); RecalcStats(); };
+            Inventory.Changed += () => { RecalcStats(); RequestSave(); };
         }
+
+        // ───────────────────────────── 능력치 ─────────────────────────────
+
+        /// <summary>
+        /// 원본(cfg) → 성장 노드 → 장비 순서로 다시 계산한다. 누적하지 않는다 — 언제 불러도 같은 값.
+        /// 던전 난이도(적 수치)는 따로 ApplyDungeonDifficulty가 맡는다.
+        /// </summary>
+        public void RecalcStats()
+        {
+            if (_live == null) return;
+            _live.maxHealth = cfg.maxHealth;
+            _live.attackCooldown = cfg.attackCooldown;
+            _live.moveSpeed = cfg.moveSpeed;
+            _live.walkSpeed = cfg.walkSpeed;
+            _live.staminaDrainPerSecond = cfg.staminaDrainPerSecond;
+            _live.critChance = cfg.critChance;
+            _live.critDamage = cfg.critDamage;
+            _live.damageReduction = cfg.damageReduction;
+            Progression.ApplyTo(cfg, _live);   // 피로도 · 진입 비용 · 공격력을 원본에서 다시
+            Inventory.ApplyTo(_live);
+
+            if (_playerHealth != null)
+            {
+                _playerHealth.DamageTakenMul = 1f - _live.damageReduction;
+                _playerHealth.SetMax(_live.maxHealth);
+            }
+            StatsChanged?.Invoke();
+        }
+
+        public event Action StatsChanged;
+
+        /// <summary>장비가 나오는 깊이 — 지금 던전의 위험도 (1~4).</summary>
+        public int ItemTier => Dungeon != null ? Mathf.Clamp(Dungeon.danger, 1, 4) : 1;
+
+        void OnEnemyDiedAt(Vector3 pos, bool elite)
+        {
+            if (Phase != RunPhase.InDungeon) return;
+            float luck = 1f + 0.25f * Progression.Level(NodeId.LootLuck);
+            var it = ItemDb.RollMonsterDrop(ItemTier, elite, luck);
+            if (it != null) room.SpawnLoot(it, pos, 0);
+        }
+
+        void OnChestOpened(Vector3 pos)
+        {
+            if (Phase != RunPhase.InDungeon) return;
+            bool rareOnly = Progression.Level(NodeId.ChestRare) > 0;
+            int count = ItemDb.ChestItemCount + Progression.Level(NodeId.ChestExtra);
+            var items = ItemDb.RollChest(ItemTier, rareOnly, count);
+            for (int i = 0; i < items.Count; i++) room.SpawnLoot(items[i], pos, i + 1);
+        }
+
+        /// <summary>장비가 플레이어에게 닿았다 — 가방에 넣는다. 꽉 찼으면 못 줍는다(false).</summary>
+        public bool CollectItem(Item it)
+        {
+            if (it == null || !Inventory.Add(it)) return false;
+            RunItems.Add(it);
+            ItemLooted?.Invoke(it);
+            return true;
+        }
+
+        /// <summary>성장 노드 '분해 숙련'.</summary>
+        public float SalvageBonus => 0.2f * Progression.Level(NodeId.Salvage);
 
         void Start()
         {
@@ -119,6 +196,7 @@ namespace Proto.Core
             Phase = RunPhase.Village;
             Stamina.Draining = false;
             Stamina.Refill();
+            RecalcStats();
             _playerHealth.Configure(_live.maxHealth);   // 쓰러져 있던 캐릭터도 여기서 일어선다
 
             room.SetVisible(false);
@@ -159,13 +237,14 @@ namespace Proto.Core
 
             if (village != null) village.Hide();
             room.SetVisible(true);
-            // 이번 판에 적용할 성장을 먼저 계산한다
-            Progression.ApplyTo(cfg, _live);
+            // 이번 판에 적용할 성장 · 장비를 먼저 계산한다
+            RecalcStats();
             ApplyDungeonDifficulty();
 
             _runSeed = UnityEngine.Random.Range(1, int.MaxValue);
             Map = DungeonGenerator.Generate(_live, _runSeed);
             RunLoot.Clear();
+            RunItems.Clear();
             Stamina.Refill();
             Stamina.Draining = true;
 
@@ -252,11 +331,6 @@ namespace Proto.Core
             _enteredFrom = DungeonMap.Opposite(d);
             Map.MoveTo(next);
             EnterCurrentRoom();
-        }
-
-        void OnOreMined(OreNode ore)
-        {
-            RunLoot.Add(ore.ResourceId, Reward(ore.Yield));
         }
 
         public void RewardEnemyKill(bool elite)

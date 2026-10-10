@@ -40,7 +40,7 @@ namespace Proto.UI
         Button _treeBtn, _againBtn;
 
         Coroutine _seq;
-        bool _skip;
+        bool _skip, _ready;   // _ready: 버튼을 키로 고를 수 있다
 
         void Awake()
         {
@@ -65,6 +65,7 @@ namespace Proto.UI
 
         void Hide()
         {
+            _ready = false;
             if (_seq != null) { StopCoroutine(_seq); _seq = null; }
             _root.gameObject.SetActive(false);
         }
@@ -148,6 +149,12 @@ namespace Proto.UI
 
         void Update()
         {
+            if (_ready && _root.gameObject.activeSelf)
+            {
+                UiFocus.Keep(_panel, _againBtn);   // 빈 곳을 클릭해도 방향키가 계속 먹게
+                if (GameInput.CancelPressed) { _ready = false; _treeBtn.onClick.Invoke(); }   // Esc / ○ = 마을로
+                return;
+            }
             if (_seq == null) return;
             // 클릭이나 Space/Enter/Esc로 끝까지 건너뛴다.
             // 공격·이동 키는 받지 않는다 — 죽는 순간 연타하던 키가 연출을 날려 버리면 안 된다.
@@ -161,6 +168,7 @@ namespace Proto.UI
         IEnumerator Sequence(string reason)
         {
             _skip = false;
+            _ready = false;
             bool bossReached = run.Map.CurrentCell == run.Map.BossCell;
             bossRoomDeath = bossReached;
             int rooms = CountVisited();
@@ -208,7 +216,7 @@ namespace Proto.UI
 
             // 획득 자원 — 한 줄씩 올라오며 숫자가 차오른다
             var loot = new List<KeyValuePair<ResourceId, int>>(run.RunLoot.All);
-            if (loot.Count == 0)
+            if (loot.Count == 0 && run.RunItems.Count == 0)
             {
                 var none = UiKit.Text(_lootList, "None", "획득물 없음", 24);
                 UiKit.Place(none.rectTransform, new Vector2(0.5f, 1f), new Vector2(0f, -30f), new Vector2(400f, 36f));
@@ -233,13 +241,28 @@ namespace Proto.UI
                 }));
                 yield return Wait(rowStagger);
             }
+            // 주운 장비 — 개수와 가장 좋은 등급
+            if (run.RunItems.Count > 0)
+            {
+                var best = Rarity.Common;
+                foreach (var it in run.RunItems) if (it.rarity > best) best = it.rarity;
+                var row = UiKit.Text(_lootList, "Row_Items", "", 28);
+                UiKit.Place(row.rectTransform, new Vector2(0.5f, 1f), new Vector2(0f, -24f - loot.Count * 42f), new Vector2(520f, 40f));
+                row.richText = true;
+                row.text = $"장비   +{run.RunItems.Count}   <size=22><color=#{ItemDb.Hex(best)}>최고 {ItemDb.RarityName(best)}</color></size>";
+                yield return Wait(rowStagger);
+            }
             yield return Wait(countTime);
 
             // 3) 버튼
             _badge.gameObject.SetActive(AnyAffordable());
             _panelCg.interactable = _panelCg.blocksRaycasts = true;
             yield return Tween(0.2f, k => _buttonsCg.alpha = k);
+            // 연출을 건너뛰려고 연타하던 결정키가 버튼까지 누르지 않게 잠깐 기다린다
+            float lockEnd = Time.unscaledTime + 0.3f;
+            while (Time.unscaledTime < lockEnd) yield return null;
             _buttonsCg.interactable = true;
+            _ready = true;
             // 패드·방향키로 바로 고를 수 있게 [다시 들어가기]에 커서를 둔다
             if (UnityEngine.EventSystems.EventSystem.current != null)
                 UnityEngine.EventSystems.EventSystem.current.SetSelectedGameObject(_againBtn.gameObject);

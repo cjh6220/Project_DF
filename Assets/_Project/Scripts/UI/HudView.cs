@@ -5,7 +5,7 @@ using Proto.Core;
 
 namespace Proto.UI
 {
-    /// <summary>피로도 바, HP, 이번 판 획득물, 채굴 진행도.</summary>
+    /// <summary>피로도 바, HP, 이번 판 획득물.</summary>
     public class HudView : MonoBehaviour
     {
         [SerializeField] RunManager run;
@@ -14,8 +14,6 @@ namespace Proto.UI
         [Header("Bars")]
         [SerializeField] Image staminaFill;
         [SerializeField] Image healthFill;
-        [SerializeField] GameObject mineBarRoot;
-        [SerializeField] Image mineFill;
 
         [Header("Text")]
         [SerializeField] TMP_Text staminaText;
@@ -40,13 +38,6 @@ namespace Proto.UI
 
             run.RunLoot.Changed += (a, b) => RefreshLoot();
             run.RunLoot.Cleared += RefreshLoot;
-
-            player.MineProgressChanged += p =>
-            {
-                bool mining = p >= 0f;
-                if (mineBarRoot != null) mineBarRoot.SetActive(mining);
-                if (mining && mineFill != null) mineFill.fillAmount = p;
-            };
 
             RefreshLoot();
         }

@@ -13,6 +13,7 @@ namespace Proto.Town
     ///
     ///   왼쪽  성장 관리 NPC → 성장 트리 (노드 구매)
     ///   오른쪽 스킬 관리 NPC → 스킬 창
+    ///   대장장이 NPC → 분해 · 제작 창 (SmithView)
     ///   가운데 문 → 걸어 들어가면 정해 둔 행선지로 바로 들어간다
     ///   문 옆 행선지 석판 → 던전 선택 창. 고르면 행선지만 바뀐다 (들어가지는 않는다)
     ///
@@ -84,7 +85,11 @@ namespace Proto.Town
 
         public Vector3 SpawnPoint => spawn != null ? spawn.position : transform.position;
         bool UiOpen => (tree != null && tree.IsOpen) || (skills != null && skills.IsOpen) || (select != null && select.IsOpen)
-                       || Proto.UI.SystemMenu.IsOpen;
+                       || Proto.UI.SystemMenu.IsOpen || InventoryView.IsOpen || (Smith != null && Smith.IsOpen);
+
+        SmithView _smith;
+        /// <summary>대장장이 창 — 씬에 따로 두지 않는다. 게임이 시작되면 스스로 붙는다.</summary>
+        SmithView Smith => _smith != null ? _smith : (_smith = FindFirstObjectByType<SmithView>(FindObjectsInactive.Include));
         public DungeonDef[] Dungeons => dungeons;
         /// <summary>마을의 창(성장 · 스킬 · 행선지) 중 하나라도 열려 있나. 시스템 메뉴가 Esc를 양보한다.</summary>
         public bool AnyUiOpen => UiOpen;
@@ -123,6 +128,7 @@ namespace Proto.Town
         {
             if (tree != null) tree.Closed += OnUiClosed;
             if (skills != null) skills.Closed += OnUiClosed;
+            if (Smith != null) Smith.Closed += OnUiClosed;
             // 처음 던전은 처음부터 아는 곳이다
             if (dungeons != null && dungeons.Length > 0 && dungeons[0] != null) _seen.Add(dungeons[0].id);
             if (select != null)
@@ -167,6 +173,7 @@ namespace Proto.Town
         {
             if (tree != null && tree.IsOpen) tree.Close();
             if (skills != null && skills.IsOpen) skills.Close();
+            if (Smith != null && Smith.IsOpen) Smith.Close();
             if (select != null && select.IsOpen) select.Hide();
             SetNear(null);
             if (world != null) world.SetActive(false);
@@ -227,7 +234,9 @@ namespace Proto.Town
             }
             SetNear(best);
 
-            if (_near != null && GameInput.InteractPressed) Talk(_near);
+            // 메뉴 · 설정이 떠 있거나 방금 창을 닫은 그 키라면 대화를 열지 않는다
+            bool blocked = Proto.UI.UiFocus.ClosedRecently || Proto.UI.SystemMenu.IsOpen || Proto.UI.SettingsView.IsOpen;
+            if (_near != null && !blocked && GameInput.InteractPressed) Talk(_near);
         }
 
         void SetNear(VillageNpc n)
@@ -244,6 +253,7 @@ namespace Proto.Town
             SetNear(null);
             if (n.Role == NpcRole.Growth) { if (tree != null) tree.Open(); }
             else if (n.Role == NpcRole.Waystone) OpenDestination();
+            else if (n.Role == NpcRole.Smith) { if (Smith != null) Smith.Open(this); else OnUiClosed(); }
             else { if (skills != null) skills.Open(); }
         }
 

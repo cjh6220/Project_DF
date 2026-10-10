@@ -1,0 +1,262 @@
+using UnityEngine;
+using UnityEngine.UI;
+using TMPro;
+using Proto.Core;
+
+namespace Proto.UI
+{
+    /// <summary>
+    /// 왼쪽 위 체력 · 피로도 — 은금 문장에서 같은 길이의 막대 두 개가 뻗는다 (체력 위, 피로도 아래).
+    ///
+    ///   지연 막대   깎인 만큼 밝게 남았다가 늦게 줄어든다 (엘든 링식) — 얼마나 맞았는지 한눈에
+    ///   머리 빛     차오른 끝에 빛줄기가 맺힌다
+    ///   경고        체력 30% · 피로도 20% 아래면 막대 둘레가 붉게 / 노랗게 맥박친다
+    ///   회복 빛     값이 오르면 빛이 막대를 쓸고 지나간다
+    ///
+    /// 그림 (Resources/UI): HudBarFrame · HudBarFill · HudBarHead · HudCrest · HudBarGlow · HudBarShine.
+    /// 그림이 없으면 아무것도 하지 않고 예전 막대(StaminaBar · HealthBar)를 그대로 둔다.
+    /// 값은 매 프레임 직접 읽는다 — 창이 꺼져 있던 동안 놓친 변화도 다시 켜지면 맞는다.
+    /// </summary>
+    public class VitalsHud : MonoBehaviour
+    {
+        // ── 크기 ──
+        const float BarW = 540f, BarH = 24f;          // 막대 안쪽 (채움이 차는 칸)
+        const float CrestScale = 0.080f;              // 문장 원본(966x1056) 축소율
+        static readonly Vector2 Origin = new Vector2(30f, -26f);   // 문장 왼쪽 위
+
+        // 원본 그림 속 치수 (픽셀) — 그림을 바꾸면 여기만 고친다
+        const float FrW = 1446f, FrH = 111f, FrInL = 24f, FrInR = 1385f, FrInT = 29f, FrInB = 88f;
+        const float CrW = 966f, CrH = 1056f, CrStubTop = 286f, CrStubBottom = 810f;
+        const float GlW = 1509f, GlH = 285f, GlL = 93f, GlR = 1401f, GlT = 100f, GlB = 181f;
+
+        static readonly Color ColHp = new Color(0.88f, 0.16f, 0.16f);
+        static readonly Color ColHpLag = new Color(1f, 0.90f, 0.62f, 0.95f);
+        static readonly Color ColSt = new Color(1.00f, 0.80f, 0.16f);
+        static readonly Color ColStLag = new Color(1f, 1f, 1f, 0.55f);
+        static readonly Color ColBack = new Color(0.02f, 0.025f, 0.04f, 0.88f);
+
+        RunManager _run;
+        Health _hp;
+        Bar _hpBar, _stBar;
+
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
+        static void Boot()
+        {
+            if (UiKit.Ui("HudBarFrame") == null || UiKit.Ui("HudBarFill") == null) return;
+            foreach (var t in Resources.FindObjectsOfTypeAll<RectTransform>())
+            {
+                if (t.name != "DungeonHud" || !t.gameObject.scene.IsValid()) continue;
+                if (t.GetComponent<VitalsHud>() == null) t.gameObject.AddComponent<VitalsHud>();
+                return;
+            }
+        }
+
+        void Awake()
+        {
+            _run = FindFirstObjectByType<RunManager>();
+            var player = FindFirstObjectByType<Proto.Player.PlayerController>();
+            if (player != null) _hp = player.GetComponent<Health>();
+            Build();
+        }
+
+        void Build()
+        {
+            // 예전 막대는 숨긴다
+            foreach (var n in new[] { "StaminaBar", "HealthBar", "StaminaText" })
+            {
+                var old = transform.Find(n);
+                if (old != null) old.gameObject.SetActive(false);
+            }
+
+            var root = UiKit.Rect(transform, "Vitals");
+            root.anchorMin = root.anchorMax = root.pivot = new Vector2(0f, 1f);
+            root.anchoredPosition = Vector2.zero;
+            root.sizeDelta = Vector2.zero;
+            root.SetAsFirstSibling();
+
+            float cw = CrW * CrestScale, ch = CrH * CrestScale;
+            float hpY = Origin.y - CrStubTop * CrestScale;      // 막대 가운데 높이
+            float stY = Origin.y - CrStubBottom * CrestScale;
+            float barX = Origin.x + cw - 6f;                    // 막대 테 왼쪽 끝이 문장 꼭지에 살짝 덮인다
+
+            _hpBar = new Bar(root, "Health", barX, hpY, ColHp, ColHpLag, new Color(1f, 0.25f, 0.2f), 0.30f);
+            _stBar = new Bar(root, "Stamina", barX, stY, ColSt, ColStLag, new Color(1f, 0.75f, 0.2f), 0.20f);
+
+            // 문장은 막대 위에 (꼭지가 테를 덮게)
+            var crest = UiKit.Ui("HudCrest");
+            if (crest != null)
+            {
+                var c = UiKit.Image(root, "Crest", Color.white, crest);
+                c.rectTransform.anchorMin = c.rectTransform.anchorMax = c.rectTransform.pivot = new Vector2(0f, 1f);
+                c.rectTransform.anchoredPosition = Origin;
+                c.rectTransform.sizeDelta = new Vector2(cw, ch);
+            }
+
+            // 획득물 줄은 문장 아래로 내린다
+            float bottom = Origin.y - ch - 10f;
+            foreach (var n in new[] { "LootText", "LootStrip" })
+            {
+                var t = transform.Find(n) as RectTransform;
+                if (t == null) continue;
+                float top = t.anchoredPosition.y + t.sizeDelta.y * (1f - t.pivot.y);
+                if (top > bottom) t.anchoredPosition += new Vector2(0f, bottom - top + (n == "LootStrip" ? 6f : 0f));
+            }
+        }
+
+        void Update()
+        {
+            float dt = Time.unscaledDeltaTime;
+            if (_hp != null) _hpBar.Tick(_hp.Current, _hp.Max, dt);
+            if (_run != null && _run.Stamina != null) _stBar.Tick(_run.Stamina.Current, _run.Stamina.Max, dt);
+        }
+
+        // ───────────────────────────── 막대 하나 ─────────────────────────────
+
+        class Bar
+        {
+            readonly RectTransform _inner, _shineRt;
+            readonly Image _fill, _lag, _head, _glow, _shine;
+            readonly TextMeshProUGUI _num;
+            readonly Color _col, _warnCol;
+            readonly float _warnAt;
+            float _shown = -1f, _lagV = -1f, _holdLag, _shineT = 1f, _lastRatio = -1f;
+            int _lastCur = int.MinValue, _lastMax = int.MinValue;
+
+            public Bar(RectTransform root, string name, float x, float centerY, Color col, Color lagCol, Color warnCol, float warnAt)
+            {
+                _col = col; _warnCol = warnCol; _warnAt = warnAt;
+                var fillSpr = UiKit.Ui("HudBarFill");
+
+                // 안쪽 칸 (모든 것의 기준)
+                float sx = BarW / (FrInR - FrInL), sy = BarH / (FrInB - FrInT);
+                _inner = UiKit.Rect(root, name);
+                _inner.anchorMin = _inner.anchorMax = new Vector2(0f, 1f);
+                _inner.pivot = new Vector2(0f, 0.5f);
+                _inner.anchoredPosition = new Vector2(x + FrInL * sx, centerY);
+                _inner.sizeDelta = new Vector2(BarW, BarH);
+
+                // 경고 빛 (테 바깥)
+                var glowSpr = UiKit.Ui("HudBarGlow");
+                if (glowSpr != null)
+                {
+                    float gx = (BarW + 8f) / (GlR - GlL), gy = (BarH + 8f) / (GlB - GlT);
+                    _glow = UiKit.Image(_inner, "Glow", Color.clear, glowSpr);
+                    Around(_glow.rectTransform, GlL * gx - 4f, (GlW - GlR) * gx - 4f, GlT * gy - 4f, (GlH - GlB) * gy - 4f);
+                }
+
+                var back = UiKit.Image(_inner, "Back", ColBack, fillSpr);
+                UiKit.Stretch(back.rectTransform);
+
+                _lag = Filled(_inner, "Lag", lagCol, fillSpr);
+                _fill = Filled(_inner, "Fill", col, fillSpr);
+
+                // 회복 빛 — 막대 안에서만 보이게
+                var shineSpr = UiKit.Ui("HudBarShine");
+                if (shineSpr != null)
+                {
+                    var mask = UiKit.Rect(_inner, "ShineMask");
+                    UiKit.Stretch(mask);
+                    mask.gameObject.AddComponent<RectMask2D>();
+                    _shine = UiKit.Image(mask, "Shine", Color.clear, shineSpr);
+                    _shineRt = _shine.rectTransform;
+                    _shineRt.anchorMin = _shineRt.anchorMax = new Vector2(0f, 0.5f);
+                    _shineRt.pivot = new Vector2(0.5f, 0.5f);
+                    _shineRt.sizeDelta = new Vector2(BarH * 2.6f, BarH * 2.6f);
+                }
+
+                // 테
+                var fr = UiKit.Image(_inner, "Frame", Color.white, UiKit.Ui("HudBarFrame"));
+                Around(fr.rectTransform, FrInL * sx, (FrW - FrInR) * sx, FrInT * sy, (FrH - FrInB) * sy);
+
+                // 머리 빛
+                var headSpr = UiKit.Ui("HudBarHead");
+                if (headSpr != null)
+                {
+                    _head = UiKit.Image(_inner, "Head", Color.Lerp(col, Color.white, 0.6f), headSpr);
+                    var h = _head.rectTransform;
+                    h.anchorMin = h.anchorMax = new Vector2(0f, 0.5f);
+                    h.pivot = new Vector2(0.5f, 0.5f);
+                    h.sizeDelta = new Vector2(BarH * 2.6f * 0.175f + 4f, BarH * 2.6f);
+                }
+
+                // 숫자
+                _num = UiKit.Text(_inner, "Num", "", 17f, TextAlignmentOptions.Right);
+                UiKit.Stretch(_num.rectTransform);
+                _num.rectTransform.offsetMax = new Vector2(-BarH * 1.1f, 1f);   // 오른쪽 비스듬한 끝을 피한다
+                _num.color = new Color(1f, 1f, 1f, 0.95f);
+                _num.fontStyle = FontStyles.Bold;
+                _num.outlineWidth = 0.18f;
+                _num.outlineColor = new Color32(0, 0, 0, 200);
+            }
+
+            static Image Filled(RectTransform p, string name, Color c, Sprite s)
+            {
+                var img = UiKit.Image(p, name, c, s);
+                UiKit.Stretch(img.rectTransform);
+                img.type = Image.Type.Filled;
+                img.fillMethod = Image.FillMethod.Horizontal;
+                img.fillOrigin = (int)Image.OriginHorizontal.Left;
+                img.fillAmount = 1f;
+                return img;
+            }
+
+            /// <summary>p를 꽉 채운 뒤 사방으로 바깥(+)으로 늘린다.</summary>
+            static void Around(RectTransform rt, float l, float r, float t, float b)
+            {
+                UiKit.Stretch(rt);
+                rt.offsetMin = new Vector2(-l, -b);
+                rt.offsetMax = new Vector2(r, t);
+            }
+
+            public void Tick(float cur, float max, float dt)
+            {
+                float ratio = max <= 0f ? 0f : Mathf.Clamp01(cur / max);
+                if (_shown < 0f) { _shown = _lagV = _lastRatio = ratio; }
+
+                // 줄면 지연 막대가 잠깐 버텼다가 따라 내려온다 · 오르면 회복 빛
+                if (ratio < _lastRatio - 0.0005f) _holdLag = 0.45f;
+                if (ratio > _lastRatio + 0.01f && _shine != null) _shineT = 0f;
+                _lastRatio = ratio;
+
+                _shown = Mathf.MoveTowards(_shown, ratio, Mathf.Max(0.02f, Mathf.Abs(ratio - _shown) * 14f) * dt);
+                if (_lagV < _shown) _lagV = _shown;
+                else if ((_holdLag -= dt) <= 0f) _lagV = Mathf.MoveTowards(_lagV, _shown, (0.25f + (_lagV - _shown) * 2.2f) * dt);
+
+                _fill.fillAmount = _shown;
+                _lag.fillAmount = _lagV;
+
+                // 경고 — 맥박
+                bool warn = ratio > 0f && ratio <= _warnAt;
+                float pulse = 0.5f + 0.5f * Mathf.Sin(Time.unscaledTime * 6.5f);
+                if (_glow != null) _glow.color = warn ? new Color(_warnCol.r, _warnCol.g, _warnCol.b, 0.35f + 0.55f * pulse) : Color.clear;
+                _fill.color = warn ? Color.Lerp(_col, Color.white, 0.25f * pulse) : _col;
+
+                if (_head != null)
+                {
+                    _head.rectTransform.anchoredPosition = new Vector2(BarW * _shown, 0f);
+                    float a = _shown <= 0.001f || _shown >= 0.999f ? 0f : 0.75f + 0.25f * Mathf.Sin(Time.unscaledTime * 9f);
+                    var hc = _head.color; hc.a = a; _head.color = hc;
+                }
+
+                if (_shine != null)
+                {
+                    if (_shineT < 1f)
+                    {
+                        _shineT += dt / 0.55f;
+                        float k = Mathf.Clamp01(_shineT);
+                        _shineRt.anchoredPosition = new Vector2(Mathf.Lerp(-BarH * 2f, BarW + BarH * 2f, k), 0f);
+                        _shine.color = new Color(1f, 1f, 1f, 0.85f * Mathf.Sin(k * Mathf.PI));
+                    }
+                    else _shine.color = Color.clear;
+                }
+
+                int ci = Mathf.CeilToInt(cur), mi = Mathf.CeilToInt(max);
+                if (ci != _lastCur || mi != _lastMax)
+                {
+                    _lastCur = ci; _lastMax = mi;
+                    _num.text = $"{ci} <color=#ffffff99>/ {mi}</color>";
+                }
+            }
+        }
+    }
+}

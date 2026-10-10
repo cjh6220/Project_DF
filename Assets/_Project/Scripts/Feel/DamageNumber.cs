@@ -44,6 +44,9 @@ namespace Proto.Feel
                 case Feel.NumberKind.Info:
                     _tmp.color = new Color(1f, 0.72f, 0.25f);
                     _baseSize = 8f; _life = 1.1f; break;
+                case Feel.NumberKind.Crit:
+                    _tmp.color = new Color(1f, 0.55f, 0.15f);
+                    _baseSize = 7f; _life = 0.7f; break;
                 case Feel.NumberKind.Player:
                     _tmp.color = new Color(1f, 0.3f, 0.25f);
                     _baseSize = 5f; _life = 0.7f; break;

@@ -1,0 +1,69 @@
+using System.Collections;
+using UnityEngine;
+using Proto.Core;
+
+namespace Proto.Dungeon
+{
+    /// <summary>
+    /// 개발용 — 빛기둥 연출을 프레임으로 찍어 한 장의 격자 그림(Captures/…/loot_&lt;등급&gt;.png)으로 저장한다.
+    /// 플레이 중 LootFxRecorder.Run(…)으로 부른다. 게임에는 쓰이지 않는다.
+    /// </summary>
+    public class LootFxRecorder : MonoBehaviour
+    {
+        public static bool Busy { get; private set; }
+
+        public static void Run(RoomController room, Vector3 pos, int tier, string outDir, int fps = 20, float seconds = 3.5f, int cellW = 320, int cellH = 420)
+        {
+            var go = new GameObject("LootFxRecorder");
+            go.AddComponent<LootFxRecorder>().StartCoroutine(go.GetComponent<LootFxRecorder>().Rec(room, pos, tier, outDir, fps, seconds, cellW, cellH));
+        }
+
+        IEnumerator Rec(RoomController room, Vector3 pos, int tier, string outDir, int fps, float seconds, int cellW, int cellH)
+        {
+            Busy = true;
+            System.IO.Directory.CreateDirectory(outDir);
+            var cam = Camera.main;
+            for (int r = 0; r < 5; r++)
+            {
+                var it = ItemDb.Roll(tier, (Rarity)r);
+                room.SpawnLoot(it, pos, 0);
+                int frames = Mathf.RoundToInt(fps * seconds);
+                int cols = 10, rows = (frames + cols - 1) / cols;
+                var sheet = new Texture2D(cellW * cols, cellH * rows, TextureFormat.RGB24, false);
+                float step = 1f / fps, next = Time.time;
+                int f = 0;
+                while (f < frames)
+                {
+                    yield return new WaitForEndOfFrame();
+                    if (Time.time < next) continue;
+                    next += step;
+                    var shot = ScreenCapture.CaptureScreenshotAsTexture();
+                    // 기둥 아래 끝(바닥) 화면 위치를 기준으로 잘라낸다
+                    var sp = cam.WorldToScreenPoint(pos);
+                    float k = shot.height / 1080f;
+                    int w = Mathf.RoundToInt(cellW * 1.05f * k), h = Mathf.RoundToInt(cellH * 1.05f * k);
+                    int x0 = Mathf.Clamp(Mathf.RoundToInt(sp.x - w * 0.5f), 0, shot.width - w);
+                    int y0 = Mathf.Clamp(Mathf.RoundToInt(sp.y - h * 0.18f), 0, shot.height - h);
+                    var px = shot.GetPixels(x0, y0, w, h);
+                    Destroy(shot);
+                    // 단순 축소 (최근접)
+                    var cell = new Color[cellW * cellH];
+                    for (int y = 0; y < cellH; y++)
+                        for (int x = 0; x < cellW; x++)
+                            cell[y * cellW + x] = px[(y * h / cellH) * w + (x * w / cellW)];
+                    int cx = (f % cols) * cellW, cy = (rows - 1 - f / cols) * cellH;
+                    sheet.SetPixels(cx, cy, cellW, cellH, cell);
+                    f++;
+                }
+                sheet.Apply();
+                System.IO.File.WriteAllBytes(System.IO.Path.Combine(outDir, $"loot_{r}_{(Rarity)r}.jpg"), sheet.EncodeToJPG(88));
+                Destroy(sheet);
+                // 다음 등급 전에 지운다
+                foreach (var d in FindObjectsByType<LootDrop>(FindObjectsSortMode.None)) Destroy(d.gameObject);
+                yield return new WaitForSeconds(0.3f);
+            }
+            Busy = false;
+            Destroy(gameObject);
+        }
+    }
+}

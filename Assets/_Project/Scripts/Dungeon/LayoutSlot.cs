@@ -2,7 +2,7 @@ using UnityEngine;
 
 namespace Proto.Dungeon
 {
-    public enum SlotKind { Obstacle, Clutter, Enemy, Ore }
+    public enum SlotKind { Obstacle, Clutter, Enemy }
 
     /// <summary>
     /// 방 배치 프리팹 안의 자리 하나. 옮기고, 크기를 바꾸고, 지우고, 복사해서 늘리면 된다.
@@ -10,9 +10,8 @@ namespace Proto.Dungeon
     ///   Obstacle  큰 장애물 (던전 테마의 obstacles 중 하나 — 숲이면 나무 · 바위, 폐광이면 바위). scale = 크기 배율
     ///   Clutter   풀 · 덤불 무리의 중심. radius 안에 count개를 몰아 심는다
     ///   Enemy     몬스터가 서는 자리 (방의 마릿수만큼, 입구에서 먼 자리부터 쓴다)
-    ///   Ore       광맥 자리 (방의 광맥 수만큼 앞에서부터 쓴다)
     ///
-    /// 씬 화면에서 색으로 보인다 — 장애물 갈색 · 풀 초록 · 몬스터 빨강 · 광맥 하늘색.
+    /// 씬 화면에서 색으로 보인다 — 장애물 갈색 · 풀 초록 · 몬스터 빨강.
     /// </summary>
     public class LayoutSlot : MonoBehaviour
     {
@@ -45,10 +44,6 @@ namespace Proto.Dungeon
                     Gizmos.color = new Color(1f, 0.25f, 0.2f, 0.9f);
                     Gizmos.DrawSphere(p + Vector3.up * 0.5f, 0.45f);
                     Gizmos.DrawLine(p, p + Vector3.up * 1.6f);
-                    break;
-                case SlotKind.Ore:
-                    Gizmos.color = new Color(0.3f, 0.8f, 1f, 0.9f);
-                    Gizmos.DrawWireCube(p + Vector3.up * 0.4f, new Vector3(0.9f, 0.8f, 0.9f));
                     break;
             }
         }

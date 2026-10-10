@@ -315,7 +315,7 @@ namespace Proto.EditorTools
 
         // ───────────────────────────── NPC ─────────────────────────────
 
-        static VillageNpc Npc(Transform w, string model, Vector3 pos, float yaw, NpcRole role,
+        public static VillageNpc Npc(Transform w, string model, Vector3 pos, float yaw, NpcRole role,
                               string title, string name, Color titleColor, RuntimeAnimatorController ctrl)
         {
             var root = new GameObject("Npc_" + role);
@@ -495,7 +495,7 @@ namespace Proto.EditorTools
         // ───────────────────────────── 도구 ─────────────────────────────
 
         /// <summary>프리팹을 놓고 높이를 맞춘다. solid면 발밑에 막는 상자를 깐다.</summary>
-        static GameObject Place(Transform parent, string path, Vector3 pos, float yaw, float height, bool solid = false, float maxWidth = 0f)
+        public static GameObject Place(Transform parent, string path, Vector3 pos, float yaw, float height, bool solid = false, float maxWidth = 0f)
         {
             var prefab = AssetDatabase.LoadAssetAtPath<GameObject>(path);
             if (prefab == null) { Debug.LogWarning("[Village] 프리팹 없음: " + path); return null; }

@@ -28,7 +28,6 @@ namespace Proto.EditorTools
             var ac = AnimatorController.CreateAnimatorControllerAtPath(OutPath);
 
             ac.AddParameter("Speed", AnimatorControllerParameterType.Float);
-            ac.AddParameter("Mining", AnimatorControllerParameterType.Bool);
             ac.AddParameter("Dead", AnimatorControllerParameterType.Trigger);
 
             var sm = ac.layers[0].stateMachine;
@@ -47,11 +46,6 @@ namespace Proto.EditorTools
             var c2 = State(sm, "Combo2", Sword("Player/BasicCombo/M_katana_Blade@Attack_3Combo_2_Inplace.FBX"), 1.30f, new Vector3(560, -50, 0));
             var c3 = State(sm, "Combo3", Sword("Player/BasicCombo/M_katana_Blade@Attack_3Combo_3_Inplace.FBX"), 1.25f, new Vector3(560, 20, 0));
 
-            // 채굴 — 다리는 제자리에 서고(기본 층 Mine = 대기 자세), 상체만 곡괭이질을 한다(위 층 MineSwing).
-            // 곡괭이 전용 모션이 팩에 없어서 대검 내려찍기(두 손으로 머리 위에서)를 빌린다.
-            // 통째로 쓰면 깊게 내딛으며 광맥 속으로 파고든다 — 그래서 상체 마스크로 하체를 막는다.
-            var mine = State(sm, "Mine", Clip("In Place/Pirate/Pirate_Idle.anim", "Pirate_Idle"), 1f, new Vector3(260, 170, 0));
-
             var dead = State(sm, "Death", Clip("In Place/Deaths/Death_Slashed.fbx", "Death_Slashed"), 1f, new Vector3(560, 160, 0));
 
             sm.defaultState = idle;
@@ -59,11 +53,6 @@ namespace Proto.EditorTools
             // ── 이동 ─────────────────────────────────────────────
             Go(idle, run, 0.12f, Cond(AnimatorConditionMode.Greater, "Speed", 0.1f));
             Go(run, idle, 0.12f, Cond(AnimatorConditionMode.Less, "Speed", 0.1f));
-
-            // ── 채굴 ─────────────────────────────────────────────
-            Go(idle, mine, 0.10f, Cond(AnimatorConditionMode.If, "Mining", 0f));
-            Go(run,  mine, 0.10f, Cond(AnimatorConditionMode.If, "Mining", 0f));
-            Go(mine, idle, 0.12f, Cond(AnimatorConditionMode.IfNot, "Mining", 0f));
 
             // ── 공격 ─────────────────────────────────────────────
             // 안전장치 — 코드가 돌려보내지 못해도 클립이 끝나면 대기로
@@ -74,30 +63,11 @@ namespace Proto.EditorTools
             // ── 사망 ─────────────────────────────────────────────
             AnyGo(sm, dead, 0.08f, Cond(AnimatorConditionMode.If, "Dead", 0f));
 
-            // ── 채굴 상체 층 ─────────────────────────────────────
-            // 무게는 PlayerAnimator가 채굴 중에만 1로 올린다. 평소엔 0이라 아무 영향 없다.
-            EnsureLoop(SwordPack + MineClipPath);
-            ac.AddLayer(new AnimatorControllerLayer
-            {
-                name = "MineUpper",
-                defaultWeight = 0f,
-                blendingMode = AnimatorLayerBlendingMode.Override,
-                avatarMask = UpperBodyMask(),
-                stateMachine = new AnimatorStateMachine { name = "MineUpper", hideFlags = HideFlags.HideInHierarchy },
-            });
-            var layers = ac.layers;
-            var upper = layers[layers.Length - 1].stateMachine;
-            AssetDatabase.AddObjectToAsset(upper, ac);
-            var swing = upper.AddState("MineSwing", new Vector3(260, 0, 0));
-            swing.motion = Sword(MineClipPath);
-            swing.speed = 1.25f;
-            upper.defaultState = swing;
-            ac.layers = layers;
-
             EditorUtility.SetDirty(ac);
             AssetDatabase.SaveAssets();
 
             Debug.Log("[Proto] 플레이어 애니메이터 생성 — " + OutPath);
+            SkillAnimatorBuilder.Build();   // 새로 만들면 스킬 상태가 빠지므로 다시 넣는다
             return ac;
         }
 
@@ -148,39 +118,6 @@ namespace Proto.EditorTools
         const string SwordPack = "Assets/Animation/_InUse/";
 
         /// <summary>_InUse 폴더의 fbx에서 클립을 꺼낸다.</summary>
-        /// <summary>상체만 — 허리 위(몸통·머리·두 팔·손가락). 다리와 루트는 기본 층을 따른다.</summary>
-        static AvatarMask UpperBodyMask()
-        {
-            const string path = "Assets/_Project/Animation/UpperBody.mask";
-            var m = AssetDatabase.LoadAssetAtPath<AvatarMask>(path);
-            if (m == null) { m = new AvatarMask(); AssetDatabase.CreateAsset(m, path); }
-            for (int i = 0; i < (int)AvatarMaskBodyPart.LastBodyPart; i++)
-            {
-                var part = (AvatarMaskBodyPart)i;
-                bool on = part == AvatarMaskBodyPart.Body || part == AvatarMaskBodyPart.Head
-                       || part == AvatarMaskBodyPart.LeftArm || part == AvatarMaskBodyPart.RightArm
-                       || part == AvatarMaskBodyPart.LeftFingers || part == AvatarMaskBodyPart.RightFingers;
-                m.SetHumanoidBodyPartActive(part, on);
-            }
-            EditorUtility.SetDirty(m);
-            return m;
-        }
-
-        const string MineClipPath = "Player/Mining/M_Big_Sword@Attack_4Combo_4_Inplace.FBX";
-
-        /// <summary>FBX 안 클립을 반복 재생으로. 이미 켜져 있으면 건드리지 않는다.</summary>
-        static void EnsureLoop(string path)
-        {
-            var imp = AssetImporter.GetAtPath(path) as ModelImporter;
-            if (imp == null) return;
-            var clips = imp.clipAnimations.Length > 0 ? imp.clipAnimations : imp.defaultClipAnimations;
-            bool changed = false;
-            foreach (var c in clips) if (!c.loopTime) { c.loopTime = true; changed = true; }
-            if (!changed) return;
-            imp.clipAnimations = clips;
-            imp.SaveAndReimport();
-        }
-
         static AnimationClip Sword(string rel)
         {
             foreach (var o in AssetDatabase.LoadAllAssetsAtPath(SwordPack + rel))

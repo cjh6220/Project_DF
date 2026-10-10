@@ -14,7 +14,7 @@ namespace Proto.UI
     /// 스킬 창 — 마을 오른쪽 스킬 관리 NPC가 연다.
     ///
     ///   위    제목 · 보유 SP · 닫기
-    ///   가운데 스킬 12종 카드. 누르면 고른다. 배운 스킬은 끌어서 퀵슬롯에 넣는다.
+    ///   가운데 스킬 카드. 누르면 고른다. 배운 스킬은 끌어서 퀵슬롯에 넣는다.
     ///   아래  고른 스킬의 현재 → 다음 레벨, [배우기 · N SP] / [강화 · N SP]
     ///   맨 아래 퀵슬롯 — 끌어서 순서 변경, 우클릭·✕·밖으로 끌기로 해제
     ///
@@ -108,13 +108,17 @@ namespace Proto.UI
                 InputFx.Set(c.Cmd, InputGlyphs.Command(SkillBook.All[c.Index].Cmd), (c.Index % 4 + c.Index / 4) * 0.035f);
             for (int i = 0; i < _slots.Count; i++) InputFx.Set(_slots[i].Num, InputGlyphs.Slot(i), 0.2f + i * 0.04f);
             InputFx.Set(_slotSub, kb ? "배운 스킬을 드래그하거나 A S D F로 등록" : $"스킬을 고르고 {InputGlyphs.Of(Act.Chord)} + 버튼으로 등록", 0.18f);
-            InputFx.Set(_slotFoot, kb ? "드래그로 순서 변경  ·  우클릭으로 해제" : $"같은 칸을 한 번 더 누르면 해제  ·  {InputGlyphs.Of(Act.Interact)} 배우기/강화", 0.24f);
+            InputFx.Set(_slotFoot, kb ? $"같은 키를 한 번 더 = 해제  ·  {InputGlyphs.Of(Act.Interact)} 배우기/강화  ·  드래그 · 우클릭도 됨" : $"같은 칸을 한 번 더 누르면 해제  ·  {InputGlyphs.Of(Act.Interact)} 배우기/강화", 0.24f);
             InputFx.Set(_closeLabel, $"닫기 ({InputGlyphs.Of(Act.Cancel)})", 0.3f);
             if (IsOpen) ShowDetail();
         }
 
+        float _openedAt = -10f;
+
         public void Open()
         {
+            _openedAt = Time.unscaledTime;
+            UiFocus.Block(this, () => this != null && IsOpen);   // 뒤의 버튼이 같은 Enter를 받지 않게
             _root.gameObject.SetActive(true);
             transform.SetAsLastSibling();
             Refresh();
@@ -126,6 +130,7 @@ namespace Proto.UI
             bool was = IsOpen;
             EndDrag();
             _root.gameObject.SetActive(false);
+            UiFocus.Unblock(this);
             if (was) Closed?.Invoke();
         }
 
@@ -133,14 +138,23 @@ namespace Proto.UI
         {
             if (!IsOpen) return;
             if (GameInput.CancelPressed) { Close(); return; }
+            // 창을 연 그 키(Space · ×)가 바로 '배우기'로 새지 않게 잠깐 입력을 받지 않는다
+            if (Time.unscaledTime - _openedAt < 0.15f) return;
 
             // 방향키·패드 — 카드 사이 이동 (4열)
             var d = GameInput.Navigate();
             if (d != Vector2Int.zero)
             {
-                int n = SkillBook.All.Length, col = _selected % 4, row = _selected / 4;
-                col = (col + d.x + 4) % 4;
-                row = (row - d.y + n / 4) % (n / 4);
+                int n = SkillBook.All.Length, rows = (n + 3) / 4, col = _selected % 4, row = _selected / 4;
+                if (d.x != 0)
+                {
+                    int inRow = Mathf.Min(4, n - row * 4);   // 마지막 줄은 덜 찰 수 있다
+                    col = (col + d.x + inRow) % inRow;
+                }
+                else
+                {
+                    do row = (row - d.y + rows) % rows; while (row * 4 + col >= n);
+                }
                 Select(row * 4 + col);
             }
             if (GameInput.InteractPressed) DoAction();

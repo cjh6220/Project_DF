@@ -108,6 +108,97 @@ namespace Proto.EditorTools
             EditorUtility.SetDirty(snow);
         }
 
+        /// <summary>
+        /// 마계 균열 — Assets/Model/{이름}/ 에 Tripo FBX를 넣고 메뉴 Proto ▸ Build Rift Monsters.
+        ///   일반  RiftImp(균열 임프) · CrystalFiend(수정 마귀) · VoidCultist(공허 추종자) · VoidEye(공허의 눈 — 떠다님, 리깅 불필요)
+        ///   엘리트 RiftBrute(균열 파괴자) · FallenKnight(타락한 기사)
+        ///   보스  RiftLord(균열의 군주)
+        /// 무기는 Assets/Model/W_RiftDagger · W_RiftClub · W_RiftGreatsword · W_RiftCleaver. 없으면 기존 소품 무기.
+        /// 아직 없는 모델은 건너뛰고, 하나도 없으면 지금 임시 몬스터(동물)를 그대로 둔다.
+        /// </summary>
+        [MenuItem("Proto/Build Rift Monsters")]
+        public static void BuildRiftMenu()
+        {
+            System.IO.Directory.CreateDirectory(OutPrefab);
+            var zombie = AssetDatabase.LoadAssetAtPath<AnimatorController>(OutCtl + "Monster_Zombie.controller");
+            var skeleton = AssetDatabase.LoadAssetAtPath<AnimatorController>(OutCtl + "Monster_Skeleton.controller");
+            var heavy = AssetDatabase.LoadAssetAtPath<AnimatorController>(OutCtl + "Monster_Heavy.controller");
+            if (zombie == null || skeleton == null || heavy == null) { Debug.LogError("[Proto] 몬스터 컨트롤러가 없습니다 — Proto ▸ Build Undead Monsters를 먼저"); return; }
+            BuildRift(zombie, skeleton, heavy);
+            AssetDatabase.SaveAssets();
+        }
+
+        static void BuildRift(AnimatorController zombie, AnimatorController skeleton, AnimatorController heavy)
+        {
+            var imp = TripoMonster("RiftImp", 1.3f, skeleton);
+            var fiend = TripoMonster("CrystalFiend", 1.9f, zombie);
+            var cultist = TripoMonster("VoidCultist", 1.8f, skeleton, RiftWeapon("W_RiftDagger", W_Sword), 0.6f);
+            var eye = FloatingMonster("VoidEye", 1.5f);   // 1m는 화면에서 너무 작다
+            var brute = TripoMonster("RiftBrute", 2.6f, heavy, RiftWeapon("W_RiftClub", W_Hammer), 1.5f);          // 엘리트
+            var knight = TripoMonster("FallenKnight", 2.1f, heavy, RiftWeapon("W_RiftGreatsword", W_Sword), 1.5f);  // 엘리트
+            var lord = BuildBoss("RiftLord", 2.0f, BigSword("Attack_4Combo_3_Inplace"), Clip("Zombie/Zombie_Idle_1"), RiftWeapon("W_RiftCleaver", W_Hammer), 1.6f);
+
+            var rift = AssetDatabase.LoadAssetAtPath<Proto.Data.StageTheme>("Assets/_Project/Data/Stage4_Rift.asset");
+            if (rift == null) return;
+            var normals = NonNull(imp, imp, fiend, cultist, eye);
+            if (normals.Length > 0) rift.enemyModels = normals;
+            var elites = NonNull(brute, knight);
+            if (elites.Length > 0)
+            {
+                rift.championModels = elites;
+                var skills = new System.Collections.Generic.List<Proto.Data.StageTheme.EliteSkills>();
+                if (brute != null) skills.Add(new Proto.Data.StageTheme.EliteSkills { model = brute, skills = new[] { Proto.Enemy.MonsterSkillId.Charge, Proto.Enemy.MonsterSkillId.Slam } });
+                if (knight != null) skills.Add(new Proto.Data.StageTheme.EliteSkills { model = knight, skills = new[] { Proto.Enemy.MonsterSkillId.Combo, Proto.Enemy.MonsterSkillId.Quake } });
+                rift.eliteSkills = skills.ToArray();
+            }
+            if (lord != null)
+            {
+                rift.bossModel = lord;
+                rift.bossScale = 2.0f;      // 2m × 2 = 4m
+                rift.bossName = "검은 갈기";
+                rift.bossTitle = "균열의 군주";
+            }
+            EditorUtility.SetDirty(rift);
+            Debug.Log($"[Proto] 마계 균열 — 일반 {normals.Length} · 엘리트 {elites.Length} · 보스 {(lord != null ? 1 : 0)}");
+        }
+
+        /// <summary>Assets/Model/{folder}/ 의 무기 FBX. 없으면 대신 쓸 소품.</summary>
+        static string RiftWeapon(string folder, string fallback)
+        {
+            foreach (var g in AssetDatabase.FindAssets("t:Model", new[] { "Assets/Model/" + folder }))
+                return AssetDatabase.GUIDToAssetPath(g);
+            return fallback;
+        }
+
+        /// <summary>
+        /// 리깅 없는 떠다니는 몬스터 (공허의 눈). 애니메이터 없이 저장하면 EnemyVisual이 위아래로 흔들고 공격 때 들이받는다.
+        /// size = 가장 긴 변 (m).
+        /// </summary>
+        static GameObject FloatingMonster(string name, float size)
+        {
+            string fbx = null;
+            foreach (var g in AssetDatabase.FindAssets("t:Model", new[] { "Assets/Model/" + name })) { fbx = AssetDatabase.GUIDToAssetPath(g); break; }
+            if (fbx == null) { Debug.LogWarning("[Proto] 모델 없음: Assets/Model/" + name); return null; }
+            var imp = (ModelImporter)AssetImporter.GetAtPath(fbx);
+            imp.animationType = ModelImporterAnimationType.None;
+            imp.importAnimation = false;
+            imp.isReadable = true;
+            imp.SaveAndReimport();
+
+            var go = (GameObject)PrefabUtility.InstantiatePrefab(AssetDatabase.LoadAssetAtPath<GameObject>(fbx));
+            PrefabUtility.UnpackPrefabInstance(go, PrefabUnpackMode.Completely, InteractionMode.AutomatedAction);
+            go.name = name;
+            foreach (var an in go.GetComponentsInChildren<Animator>(true)) Object.DestroyImmediate(an);
+            Bounds b = new Bounds(); bool any = false;
+            foreach (var r in go.GetComponentsInChildren<Renderer>(true)) { if (!any) { b = r.bounds; any = true; } else b.Encapsulate(r.bounds); }
+            float longest = any ? Mathf.Max(b.size.x, Mathf.Max(b.size.y, b.size.z)) : 1f;
+            go.transform.localScale = Vector3.one * (size / Mathf.Max(0.0001f, longest));
+            go.AddComponent<Proto.Enemy.TentacleSway>();   // 촉수 흐느적
+            var saved = PrefabUtility.SaveAsPrefabAsset(go, OutPrefab + name + ".prefab");
+            Object.DestroyImmediate(go);
+            return saved;
+        }
+
         // ── 무기 (polyperfect 소품) ──
         const string W_Spear = "Assets/polyperfect/Poly Universal Pack/- Prefabs/Primeval/bone-spear-primeval.prefab";
         const string W_Sword = "Assets/polyperfect/Low Poly Ultimate Pack/M/- Prefabs_M/Medieval_M/sword.prefab";
@@ -223,7 +314,30 @@ namespace Proto.EditorTools
             imp.importAnimation = false;
             if (h > 0.01f) imp.globalScale = height / h;
             imp.SaveAndReimport();
+            ResetAvatar(fbx);
             return fbx;
+        }
+
+        /// <summary>
+        /// 아바타(뼈대 기준 자세)를 지금 크기로 다시 만든다. 크기만 바꾸고 다시 가져오면 예전 크기의 기준 자세가 남아
+        /// 움직일 때 몸이 수십 m로 늘어난다 — 그래서 Generic으로 한 번 풀었다가 Human으로 다시 만든다.
+        /// </summary>
+        static void ResetAvatar(string fbx)
+        {
+            var imp = (ModelImporter)AssetImporter.GetAtPath(fbx);
+            string hips = null; foreach (var hb in imp.humanDescription.human) if (hb.humanName == "Hips") hips = hb.boneName;
+            float y = 0f; foreach (var sk in imp.humanDescription.skeleton) if (sk.name == hips) y = sk.position.y;
+            float expect = MeshHeight(fbx) * 0.5f;
+            if (hips != null && expect > 0.01f && Mathf.Abs(y - expect) < expect * 0.5f) return;   // 이미 맞다
+            float gs = imp.globalScale;
+            imp.animationType = ModelImporterAnimationType.Generic;
+            imp.SaveAndReimport();
+            imp = (ModelImporter)AssetImporter.GetAtPath(fbx);
+            imp.animationType = ModelImporterAnimationType.Human;
+            imp.avatarSetup = ModelImporterAvatarSetup.CreateFromThisModel;
+            imp.importAnimation = false;
+            imp.globalScale = gs;
+            imp.SaveAndReimport();
         }
 
         static GameObject SavePrefab(string name, string fbx, RuntimeAnimatorController ctl, string weapon, float weaponLength, float rootScale = 1f)

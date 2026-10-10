@@ -1,0 +1,53 @@
+// 몬스터 외곽선 — 바닥 색에 묻히지 않게 몸 둘레에 얇은 선을 두른다.
+// 렌더러의 머티리얼 목록 끝에 덧붙여 쓴다 (MonsterOutline.Apply). 스킨드 메시도 그대로 된다.
+// 두께는 화면 기준이라 멀리 있어도 같은 굵기 (_OutlineWidth 0.003 ≈ 1080p에서 약 1.6px).
+Shader "Proto/MonsterOutline"
+{
+    Properties
+    {
+        _OutlineColor ("Color", Color) = (0.95, 0.8, 1, 1)
+        _OutlineWidth ("Width", Float) = 0.003
+    }
+    SubShader
+    {
+        Tags { "RenderType" = "Opaque" "RenderPipeline" = "UniversalPipeline" "Queue" = "Geometry+10" }
+
+        Pass
+        {
+            Name "Outline"
+            Tags { "LightMode" = "SRPDefaultUnlit" }
+            Cull Front
+            ZWrite On
+
+            HLSLPROGRAM
+            #pragma vertex vert
+            #pragma fragment frag
+            #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
+
+            CBUFFER_START(UnityPerMaterial)
+                half4 _OutlineColor;
+                float _OutlineWidth;
+            CBUFFER_END
+
+            struct Attributes { float4 positionOS : POSITION; float3 normalOS : NORMAL; };
+            struct Varyings { float4 positionCS : SV_POSITION; };
+
+            Varyings vert (Attributes i)
+            {
+                Varyings o;
+                float4 cs = TransformObjectToHClip(i.positionOS.xyz);
+                float3 nWS = TransformObjectToWorldNormal(i.normalOS);
+                float2 nCS = mul((float3x3)UNITY_MATRIX_VP, nWS).xy;
+                float len = max(length(nCS), 1e-5);
+                float2 off = nCS / len * _OutlineWidth * cs.w * 2.0;
+                off.x *= _ScreenParams.y / _ScreenParams.x;   // 가로세로 같은 굵기
+                cs.xy += off;
+                o.positionCS = cs;
+                return o;
+            }
+
+            half4 frag (Varyings i) : SV_Target { return _OutlineColor; }
+            ENDHLSL
+        }
+    }
+}

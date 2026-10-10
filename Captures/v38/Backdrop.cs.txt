@@ -1,0 +1,98 @@
+using UnityEngine;
+
+namespace Proto.Dungeon
+{
+    /// <summary>
+    /// 원경 배경. 카메라에 붙은 그림판 한 장이 화면 뒤를 채운다 — 안개 너머에 먼 산·숲·하늘이 보이게.
+    ///
+    /// 카메라는 직교 투영이라 판의 화면 크기는 거리와 상관없다. 판을 화면에 맞춰 늘리고,
+    /// 안개가 짙어지는 거리에 세운다 — 그보다 가까운 땅·나무는 판 앞에 그려지고,
+    /// 더 먼 것(안개에 묻혀 어차피 안 보이던 것)은 판 뒤로 사라진다.
+    /// 판을 맨 뒤에 두면 내려다보는 카메라 탓에 땅이 화면 위까지 덮어 그림이 전혀 안 보인다.
+    /// 그림 아래쪽은 지금 안개색으로 녹아든다 — 마을·던전마다 안개색이 바뀌어도 이음새가 안 보인다.
+    ///
+    /// 마을과 던전이 그림을 바꿔 끼운다: Backdrop.Show(texture, shift).
+    /// </summary>
+    public class Backdrop : MonoBehaviour
+    {
+        [Tooltip("기본 거리. Show에서 장면마다 바꾼다. 가까울수록 뒤쪽 나무 줄이 그림에 가려 그림이 더 많이 보인다")]
+        [SerializeField] float distance = 32f;
+        [Tooltip("화면보다 얼마나 크게 (가장자리가 비지 않게)")]
+        [SerializeField] float overscan = 1.04f;
+        [Tooltip("그림 위쪽을 화면 위쪽에 맞춘 뒤 그림을 이만큼 올린다 (그림 높이 비율). +면 그림 아래쪽(지평선)이 더 보인다")]
+        [SerializeField] float shift = 0f;
+        [SerializeField] Renderer quad;
+
+        static Backdrop _i;
+        MaterialPropertyBlock _mpb;
+        Texture _tex;
+        float _shift, _depth = -1f;
+        static readonly int IdTex = Shader.PropertyToID("_MainTex");
+        static readonly int IdFade = Shader.PropertyToID("_FadeColor");
+        static readonly int IdHaze = Shader.PropertyToID("_Haze");
+        float _haze = 0.25f;
+
+        /// <summary>그림을 바꾼다. tex가 없으면 판을 숨겨 예전처럼 안개색 하늘만 보인다.</summary>
+        public static void Show(Texture tex, float shift = 0f, float haze = 0.25f, float depth = -1f)
+        {
+            var b = Find();
+            if (b == null) return;
+            b._tex = tex; b._shift = shift; b._haze = haze; b._depth = depth;
+            b.Apply();
+        }
+
+        static Backdrop Find()
+        {
+            if (_i != null) return _i;
+            _i = FindFirstObjectByType<Backdrop>(FindObjectsInactive.Include);
+            return _i;
+        }
+
+        void OnEnable() { _i = this; if (quad != null && _tex == null) quad.enabled = false; }
+
+        void Apply()
+        {
+            if (quad == null) return;
+            quad.enabled = _tex != null;
+            if (_tex == null) return;
+            _mpb ??= new MaterialPropertyBlock();
+            quad.GetPropertyBlock(_mpb);
+            _mpb.SetTexture(IdTex, _tex);
+            _mpb.SetFloat(IdHaze, _haze);
+            quad.SetPropertyBlock(_mpb);
+            LateUpdate();
+        }
+
+        void LateUpdate()
+        {
+            var cam = GetComponentInParent<Camera>();
+            if (cam == null || quad == null) return;
+
+            // 직교 화면을 덮는 크기. 그림 비율을 지키고 가로를 맞춘다 (세로가 모자라면 세로를 맞춘다)
+            float dist = _depth > 0f ? _depth : distance;
+            float viewH = cam.orthographic ? cam.orthographicSize * 2f : 2f * dist * Mathf.Tan(cam.fieldOfView * 0.5f * Mathf.Deg2Rad);
+            float viewW = viewH * cam.aspect;
+            float aspect = 1.5f;
+            var tex = _tex != null ? _tex : (quad.sharedMaterial != null ? quad.sharedMaterial.mainTexture : null);
+            if (tex != null && tex.height > 0) aspect = (float)tex.width / tex.height;
+            float w = viewW * overscan, h = w / aspect;
+            if (h < viewH * overscan) { h = viewH * overscan; w = h * aspect; }
+
+            // 그림 위쪽을 화면 위쪽에 맞추고, shift만큼 그림을 올린다 (그림 아래쪽이 더 보인다)
+            // 어떻게 옮겨도 그림이 화면 밖으로 빠져 가장자리가 비지는 않게 막는다
+            float top = viewH * 0.5f * overscan;
+            float y = top - h * 0.5f + (shift + _shift) * h;
+            y = Mathf.Clamp(y, top - h * 0.5f, h * 0.5f - top);
+            var t = quad.transform;
+            t.localPosition = new Vector3(0f, y, dist);
+            t.localRotation = Quaternion.identity;
+            t.localScale = new Vector3(w, h, 1f);
+
+            // 아래쪽은 지금 안개색으로
+            _mpb ??= new MaterialPropertyBlock();
+            quad.GetPropertyBlock(_mpb);
+            _mpb.SetColor(IdFade, RenderSettings.fog ? RenderSettings.fogColor : cam.backgroundColor);
+            quad.SetPropertyBlock(_mpb);
+        }
+    }
+}

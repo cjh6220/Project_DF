@@ -1,0 +1,114 @@
+using UnityEngine;
+using UnityEngine.UI;
+
+namespace Proto.UI
+{
+    /// <summary>
+    /// 던전 HUD 겉모습 — 에디터에서 씬에 굽는다 (게임 중에는 아무것도 하지 않는다).
+    /// 씬 빌더가 HUD를 만든 직후 부르고, 메뉴 Proto ▸ Build Hit FX + UI Sprites 로도 다시 구울 수 있다.
+    /// 구워진 테두리·띠는 씬에 저장되므로 하이어라키에서 바로 보이고 손으로 옮길 수 있다.
+    ///
+    ///   피로도·체력·채굴 막대  BarFrame(왼쪽 비스듬한 끝) + BarFill(사선 줄무늬, 색은 원래 색을 곱한다)
+    ///   미니맵               MinimapFrame + 유리 바탕
+    ///   획득물 줄            InfoStrip(오른쪽으로 사라지는 띠)
+    /// 그림이 없으면 아무것도 하지 않는다.
+    /// </summary>
+    public static class HudSkin
+    {
+        static readonly Color Back = new Color(0.03f, 0.04f, 0.06f, 0.78f);
+
+        public static void Apply(Transform canvas)
+        {
+            if (canvas == null) return;
+            var frame = UiKit.Ui("BarFrame");
+            var fill = UiKit.Ui("BarFill");
+            if (frame == null || fill == null) return;
+
+            Bar(canvas, "StaminaBar", frame, fill);
+            Bar(canvas, "HealthBar", frame, fill);
+            Bar(canvas, "MineFill", frame, fill);
+            Minimap(canvas);
+            LootStrip(canvas);
+        }
+
+        static Transform Find(Transform root, string name)
+        {
+            foreach (var t in root.GetComponentsInChildren<Transform>(true)) if (t.name == name) return t;
+            return null;
+        }
+
+        /// <summary>막대 판(bg) + 안쪽 Fill. 판은 어두운 유리, 테두리는 위에 얹는다.</summary>
+        static void Bar(Transform root, string name, Sprite frame, Sprite fill)
+        {
+            var bg = Find(root, name);
+            if (bg == null || bg.Find("Skin") != null) return;
+            var bgImg = bg.GetComponent<Image>();
+            var rt = (RectTransform)bg;
+            float h = rt.rect.height > 1f ? rt.rect.height : rt.sizeDelta.y;
+
+            if (bgImg != null) { bgImg.color = Back; }
+            var f = bg.Find("Fill");
+            if (f != null)
+            {
+                var fi = f.GetComponent<Image>();
+                fi.sprite = fill;
+                var c = fi.color;
+                fi.color = new Color(Mathf.Min(1f, c.r * 1.15f), Mathf.Min(1f, c.g * 1.15f), Mathf.Min(1f, c.b * 1.15f), 1f);
+                var frt = (RectTransform)f;
+                frt.offsetMin = new Vector2(Mathf.Max(3f, h * 0.35f), 2f);   // 왼쪽 비스듬한 끝에 안 겹치게
+                frt.offsetMax = new Vector2(-Mathf.Max(3f, h * 0.25f), -2f);
+            }
+
+            var skin = UiKit.Image(bg, "Skin", Color.white, frame);
+            skin.type = Image.Type.Sliced;
+            float pad = Mathf.Max(3f, h * 0.25f);
+            float mult = frame.rect.height / (h + pad * 2f);
+            skin.pixelsPerUnitMultiplier = mult;
+            var s = skin.rectTransform;
+            s.anchorMin = Vector2.zero; s.anchorMax = Vector2.one;
+            s.offsetMin = new Vector2(-pad * 1.4f, -pad); s.offsetMax = new Vector2(pad, pad);
+        }
+
+        /// <summary>미니맵은 칸을 다시 그릴 때 자식을 전부 지운다 — 테두리는 형제로 붙인다.</summary>
+        static void Minimap(Transform root)
+        {
+            var spr = UiKit.Ui("MinimapFrame");
+            var map = Find(root, "Minimap") as RectTransform;
+            if (spr == null || map == null || map.parent.Find("MinimapSkin") != null) return;
+            var bg = UiKit.Image(map.parent, "MinimapSkinBack", UiKit.GlassFill, UiArt.RoundRectFill);
+            bg.type = Image.Type.Sliced;
+            Match(bg.rectTransform, map, 12f);
+            bg.transform.SetSiblingIndex(map.GetSiblingIndex());
+            var skin = UiKit.Image(map.parent, "MinimapSkin", Color.white, spr);
+            skin.type = Image.Type.Sliced;
+            skin.pixelsPerUnitMultiplier = 2f;
+            Match(skin.rectTransform, map, 18f);
+            skin.transform.SetSiblingIndex(map.GetSiblingIndex() + 1);
+            skin.raycastTarget = false;
+        }
+
+        /// <summary>target과 같은 자리·크기, 사방으로 pad만큼 크게.</summary>
+        static void Match(RectTransform rt, RectTransform target, float pad)
+        {
+            rt.anchorMin = target.anchorMin; rt.anchorMax = target.anchorMax; rt.pivot = target.pivot;
+            rt.sizeDelta = target.sizeDelta + new Vector2(pad * 2f, pad * 2f);
+            // 기준점이 모서리면 그쪽으로 pad만큼 밀어야 사방이 고르게 커진다
+            rt.anchoredPosition = target.anchoredPosition + new Vector2((target.pivot.x * 2f - 1f) * pad, (target.pivot.y * 2f - 1f) * pad);
+        }
+
+        static void LootStrip(Transform root)
+        {
+            var spr = UiKit.Ui("InfoStrip");
+            var loot = Find(root, "LootText");
+            if (spr == null || loot == null || loot.parent.Find("LootStrip") != null) return;
+            var lrt = (RectTransform)loot;
+            var strip = UiKit.Image(loot.parent, "LootStrip", Color.white, spr);
+            var s = strip.rectTransform;
+            s.anchorMin = s.anchorMax = lrt.anchorMin;
+            s.pivot = new Vector2(0f, 0.5f);
+            s.anchoredPosition = lrt.anchoredPosition + new Vector2(-14f, -lrt.sizeDelta.y * (lrt.pivot.y - 0.5f));
+            s.sizeDelta = new Vector2(620f, 40f);
+            strip.transform.SetSiblingIndex(loot.GetSiblingIndex());
+        }
+    }
+}

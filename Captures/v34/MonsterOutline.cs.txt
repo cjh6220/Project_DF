@@ -1,0 +1,48 @@
+using System.Collections.Generic;
+using UnityEngine;
+
+namespace Proto.Enemy
+{
+    /// <summary>
+    /// 몬스터 외곽선. 색은 던전 테마(StageTheme.monsterOutline)에서 정한다 — 알파 0이면 끈다.
+    ///   일반 1배 · 엘리트 1.6배 · 보스 1.3배 굵기
+    /// 머티리얼은 색 · 굵기별로 하나만 만들어 같이 쓴다.
+    /// 셰이더: Resources/Fx/MonsterOutline.mat (Proto/MonsterOutline) — 빌드에서 빠지지 않게 머티리얼로 묶어 둔다.
+    /// </summary>
+    public static class MonsterOutline
+    {
+        const float BaseWidth = 0.003f;
+        static Material _base;
+        static readonly Dictionary<(Color, float), Material> _cache = new();
+
+        public static void Apply(Transform root, Color color, float widthMul = 1f)
+        {
+            if (root == null || color.a <= 0.01f) return;
+            if (_base == null) _base = Resources.Load<Material>("Fx/MonsterOutline");
+            if (_base == null) return;
+
+            var key = (color, widthMul);
+            if (!_cache.TryGetValue(key, out var mat) || mat == null)
+            {
+                mat = new Material(_base) { name = "MonsterOutline (inst)" };
+                mat.SetColor("_OutlineColor", new Color(color.r, color.g, color.b, 1f));
+                mat.SetFloat("_OutlineWidth", BaseWidth * widthMul);
+                _cache[key] = mat;
+            }
+
+            foreach (var r in root.GetComponentsInChildren<Renderer>(true))
+            {
+                if (!(r is MeshRenderer || r is SkinnedMeshRenderer)) continue;
+                var mats = r.sharedMaterials;
+                bool has = false;
+                foreach (var m in mats) if (m != null && m.shader == _base.shader) has = true;
+                if (has) continue;
+                var list = new List<Material>(mats) { mat };
+                r.sharedMaterials = list.ToArray();
+            }
+        }
+
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
+        static void Reset() { _cache.Clear(); _base = null; }
+    }
+}

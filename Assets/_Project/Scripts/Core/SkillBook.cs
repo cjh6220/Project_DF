@@ -6,7 +6,7 @@ namespace Proto.Core
     public class SkillDef
     {
         public string Name, Cmd, Role, Icon;
-        /// <summary>0 = 시작 스킬, 1~3 = 전투 단계, -1 = 채굴·탐험 갈래 (선행 조건 없음)</summary>
+        /// <summary>0 = 시작 스킬, 1~3 = 전투 단계, -1 = 탐험 갈래 (선행 조건 없음)</summary>
         public int Tier;
         public int LearnCost;
         public int MaxLevel = 5;
@@ -21,7 +21,7 @@ namespace Proto.Core
     ///   강화    레벨당 1 SP (궁극기 2 SP), Lv5에서 마스터 효과
     ///   퀵슬롯  커맨드를 몰라도 쓸 수 있게 하는 편의 — 제한이 아니다
     ///
-    /// 커맨드: 방향 + Z(스킬 키) 또는 방향 + X(공격 키). 내려찍기는 Z 단독 — 기본 스킬.
+    /// 커맨드: 방향 + Z(스킬 키) 또는 방향 + X(공격 키). 올려베기는 Z 단독 — 기본 스킬 (던파 귀검사처럼).
     ///
     /// 단계 조건: 2단은 1단 하나 이상, 3단(궁극기)은 2단 둘 이상을 배워야 한다.
     /// </summary>
@@ -35,15 +35,14 @@ namespace Proto.Core
         public static readonly SkillDef[] All =
         {
             new SkillDef { Name = "돌진베기",   Cmd = "→ Z",   Role = "접근 · 이동",     Icon = "skill_dash_slash",     Tier = 0, PerLevel = "피해 +15% · 거리 +0.5m",   Mastery = "끝에서 충격파 (주변 ×1.0)" },
-            new SkillDef { Name = "올려베기",   Cmd = "↑ X",   Role = "띄우기 · 콤보",   Icon = "skill_rising_slash",   Tier = 0, PerLevel = "피해 +15% · 체공 +0.1초",  Mastery = "띄운 적이 받는 피해 +20%" },
-            new SkillDef { Name = "내려찍기",   Cmd = "Z",     Role = "기본 스킬 · 다운", Icon = "skill_ground_slam",    Tier = 0, PerLevel = "피해 +15% · 범위 +10%",    Mastery = "슈퍼아머에도 경직" },
+            new SkillDef { Name = "올려베기",   Cmd = "Z",     Role = "기본 스킬 · 띄우기", Icon = "skill_rising_slash",   Tier = 0, PerLevel = "피해 +15% · 체공 +0.1초",  Mastery = "띄운 적이 받는 피해 +20%" },
+            new SkillDef { Name = "내려찍기",   Cmd = "↓ Z",   Role = "다운 · 광역",     Icon = "skill_ground_slam",    Tier = 0, PerLevel = "피해 +15% · 범위 +10%",    Mastery = "슈퍼아머에도 경직" },
             new SkillDef { Name = "회전베기",   Cmd = "↓↑ Z",  Role = "광역 · 탈출",     Icon = "skill_whirlwind",      Tier = 1, LearnCost = 2, PerLevel = "타격 +1회",            Mastery = "주변 적을 끌어당긴다" },
             new SkillDef { Name = "연속 찌르기", Cmd = "→→ X",  Role = "경직 고정",       Icon = "skill_rapid_thrusts",  Tier = 1, LearnCost = 2, PerLevel = "타수 +1",              Mastery = "마지막 타 넉백 ×3" },
             new SkillDef { Name = "검기 날리기", Cmd = "←→ Z",  Role = "원거리 · 관통",   Icon = "skill_sword_wave",     Tier = 2, LearnCost = 4, PerLevel = "피해 +15% · 사거리 +1m", Mastery = "검기가 둘로 갈라진다" },
             new SkillDef { Name = "발도술",     Cmd = "↓→ Z",  Role = "보스 딜 · 단일",  Icon = "skill_iaido",          Tier = 2, LearnCost = 4, PerLevel = "피해 +15%",            Mastery = "누르고 있으면 기를 모은다 (최대 ×1.5)" },
             new SkillDef { Name = "반격 자세",   Cmd = "← X",   Role = "되받아치기",      Icon = "skill_counter_stance", Tier = 2, LearnCost = 4, PerLevel = "자세 시간 +0.05초",     Mastery = "반격 성공 시 재사용 초기화" },
             new SkillDef { Name = "전투 함성",   Cmd = "↑↓ Z",  Role = "버프",            Icon = "skill_war_cry",        Tier = 2, LearnCost = 4, PerLevel = "지속 +2초",            Mastery = "외칠 때 주변 적 경직" },
-            new SkillDef { Name = "광맥 파쇄",   Cmd = "↓↓ X",  Role = "채굴",            Icon = "skill_ore_shatter",    Tier = -1, LearnCost = 3, PerLevel = "재사용 -2초 · 산출 감소 -10%p", Mastery = "산출량 감소 없음" },
             new SkillDef { Name = "질주",       Cmd = "←← X",  Role = "탐험 · 피로도",   Icon = "skill_sprint",         Tier = -1, LearnCost = 3, PerLevel = "지속 +0.5초",          Mastery = "질주 중 새 방 진입 비용 -50%" },
             new SkillDef { Name = "대지 가르기", Cmd = "↓→↑ Z", Role = "궁극기",          Icon = "skill_earth_splitter", Tier = 3, LearnCost = 8, CostPerLevel = 2, PerLevel = "피해 +20%", Mastery = "균열이 3초간 남아 지속 피해" },
         };

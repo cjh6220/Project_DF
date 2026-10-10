@@ -1,0 +1,226 @@
+using System;
+using UnityEngine;
+using Proto.Core;
+
+namespace Proto.Dungeon
+{
+    /// <summary>
+    /// 바닥에 떨어진 장비 하나.
+    ///
+    ///   튀어나옴  쓰러진 자리(상자)에서 포물선을 그리며 떨어진다 — 상자에서 여러 개면 부채꼴로 퍼진다
+    ///   빛기둥    등급 색 기둥이 잠깐 선다 (일반은 짧고 흐리게, 전설은 높고 진하게)
+    ///   줍기      잠깐 뒤 플레이어에게 날아와 저절로 가방에 들어간다 — 줍는 키를 따로 누르지 않는다
+    ///   가방 가득  줍지 못하고 빛기둥을 세운 채 바닥에 남는다. 다가가면 "가방이 가득 찼습니다".
+    ///             방을 떠나도 그 방 바닥에 남아 있다 (Room.GroundLoot) — 판이 끝나면 사라진다
+    /// </summary>
+    public class LootDrop : MonoBehaviour
+    {
+        public Item Item { get; private set; }
+        public event Action<Item> Collected;
+        /// <summary>가방에 넣어 본다 — 꽉 찼으면 false (RoomController가 RunManager에 묻는다).</summary>
+        public Func<Item, bool> TryPickup;
+        /// <summary>지금 가방에 자리가 있나.</summary>
+        public Func<bool> HasRoom;
+        /// <summary>바닥에 남은 자리 (방을 떠날 때 기억해 둔다).</summary>
+        public Vector3 RestPosition => _land;
+        /// <summary>가방에 들어갔다.</summary>
+        public bool Done => _done;
+
+        Transform _gem, _player;
+        LineRenderer _beam;
+        Light _light;
+        Vector3 _from, _land;
+        float _t, _flyT, _nextFullMsg;
+        bool _done, _flying;
+
+        const float PopTime = 0.5f, Hover = 0.55f;
+
+        static Transform _playerCache;
+        static Material _beamMat, _gemMat;
+
+        /// <summary>이미 바닥에 놓여 있던 장비 — 튀어나오는 연출 없이 그 자리에 선다.</summary>
+        public static LootDrop SpawnResting(Item item, Vector3 restPos, Transform parent)
+        {
+            var d = Spawn(item, restPos - Vector3.up * 0.35f, 0, parent, Vector3.forward);
+            d._land = restPos;
+            d._t = PopTime;
+            d.transform.position = restPos;
+            d._light.intensity = 1.6f;
+            return d;
+        }
+
+        public static LootDrop Spawn(Item item, Vector3 pos, int order, Transform parent, Vector3 forward)
+        {
+            var go = new GameObject("Loot_" + item.rarity);
+            go.transform.SetParent(parent, true);
+            go.transform.position = pos + Vector3.up * 0.4f;
+            var d = go.AddComponent<LootDrop>();
+            d.Init(item, pos, order, forward);
+            return d;
+        }
+
+        void Init(Item item, Vector3 pos, int order, Vector3 forward)
+        {
+            Item = item;
+            _from = pos + Vector3.up * 0.6f;
+            // 몬스터 드랍(0)은 옆으로 살짝, 상자(1~)는 앞쪽 부채꼴로
+            float ang = order == 0 ? UnityEngine.Random.Range(0f, 360f) : -60f + (order - 1) * 40f + UnityEngine.Random.Range(-8f, 8f);
+            float dist = order == 0 ? UnityEngine.Random.Range(0.6f, 1.1f) : 1.6f + 0.25f * (order % 2);
+            forward.y = 0f;
+            if (forward.sqrMagnitude < 0.01f) forward = Vector3.back;
+            var dir = Quaternion.Euler(0f, ang, 0f) * forward.normalized;
+            _land = pos + dir * dist;
+            _land.y = pos.y + 0.35f;
+            _t = -0.12f * Mathf.Max(0, order - 1);   // 상자에서 하나씩 차례로 튄다
+
+            var c = ItemDb.RarityColor(item.rarity);
+
+            // 보석 — 등급 색 작은 마름모
+            var gem = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            Destroy(gem.GetComponent<Collider>());
+            gem.name = "Gem";
+            gem.transform.SetParent(transform, false);
+            gem.transform.localScale = Vector3.one * (0.22f + 0.03f * (int)item.rarity);
+            gem.transform.localRotation = Quaternion.Euler(45f, 0f, 45f);
+            var gr = gem.GetComponent<Renderer>();
+            gr.sharedMaterial = GemMat();
+            var block = new MaterialPropertyBlock();
+            block.SetColor("_BaseColor", c);
+            block.SetColor("_Color", c);
+            gr.SetPropertyBlock(block);
+            gr.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+            _gem = gem.transform;
+
+            // 빛기둥
+            _beam = gameObject.AddComponent<LineRenderer>();
+            _beam.sharedMaterial = BeamMat();
+            _beam.useWorldSpace = true;
+            _beam.positionCount = 2;
+            float w = 0.10f + 0.035f * (int)item.rarity;
+            _beam.startWidth = w; _beam.endWidth = w * 0.4f;
+            var g = new Gradient();
+            float a0 = 0.35f + 0.12f * (int)item.rarity;
+            g.SetKeys(new[] { new GradientColorKey(c, 0f), new GradientColorKey(c, 1f) },
+                      new[] { new GradientAlphaKey(a0, 0f), new GradientAlphaKey(0f, 1f) });
+            _beam.colorGradient = g;
+            _beam.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+            _beam.enabled = false;
+
+            var lg = new GameObject("Light");
+            lg.transform.SetParent(transform, false);
+            _light = lg.AddComponent<Light>();
+            _light.type = LightType.Point;
+            _light.color = c;
+            _light.range = 2f + 0.5f * (int)item.rarity;
+            _light.intensity = 0f;
+            _light.shadows = LightShadows.None;
+
+            transform.position = _from;
+        }
+
+        void Update()
+        {
+            if (_done) return;
+            if (_player == null) _player = FindPlayer();
+            float dt = Time.deltaTime;
+            _t += dt;
+
+            if (_gem != null) _gem.Rotate(0f, 240f * dt, 0f, Space.World);
+
+            if (_t < 0f) { transform.position = _from; return; }
+
+            if (_t < PopTime)
+            {
+                // 포물선
+                float k = _t / PopTime;
+                var p = Vector3.Lerp(_from, _land, k);
+                p.y += Mathf.Sin(k * Mathf.PI) * 1.3f;
+                transform.position = p;
+                _light.intensity = Mathf.Lerp(0f, 1.6f, k);
+                return;
+            }
+
+            float beamH = 1.2f + 0.7f * (int)Item.rarity;
+            bool room = HasRoom == null || HasRoom();
+            if (!_flying && (_t < PopTime + Hover || !room))
+            {
+                // 바닥에 떠 있다 — 가방이 꽉 찼으면 계속 여기 남는다
+                transform.position = _land + Vector3.up * (Mathf.Sin((_t - PopTime) * 6f) * 0.05f);
+                _beam.enabled = true;
+                _beam.SetPosition(0, transform.position);
+                _beam.SetPosition(1, transform.position + Vector3.up * beamH);
+                if (!room && _player != null && _t >= PopTime + Hover)
+                {
+                    var dd = _player.position - _land; dd.y = 0f;
+                    if (dd.magnitude < 1.6f && Time.time >= _nextFullMsg)
+                    {
+                        _nextFullMsg = Time.time + 2.5f;
+                        if (Proto.Feel.Feel.I != null) Proto.Feel.Feel.I.Popup(_player.position + Vector3.up * 2.4f, "<color=#ff8a7a>가방이 가득 찼습니다</color>");
+                    }
+                }
+                return;
+            }
+
+            // 플레이어에게 날아간다 — 점점 빨라진다
+            _flying = true;
+            _beam.enabled = false;
+            if (_player == null) { CollectNow(); return; }
+            _flyT += dt;
+            var target = _player.position + Vector3.up * 1.0f;
+            float speed = 4f + 30f * _flyT;
+            transform.position = Vector3.MoveTowards(transform.position, target, speed * dt);
+            if (_gem != null) _gem.localScale = Vector3.one * Mathf.Max(0.08f, _gem.localScale.x - dt * 0.2f);
+            if ((transform.position - target).sqrMagnitude < 0.09f || _flyT > 1.5f) CollectNow();
+        }
+
+        /// <summary>가방에 넣는다. 그 사이 가방이 찼으면 발밑에 다시 내려놓는다.</summary>
+        public void CollectNow()
+        {
+            if (_done) return;
+            if (TryPickup != null && !TryPickup(Item))
+            {
+                _flying = false; _flyT = 0f;
+                if (_player != null) { _land = _player.position; _land.y += 0.35f; }
+                if (_gem != null) _gem.localScale = Vector3.one * (0.22f + 0.03f * (int)Item.rarity);
+                return;
+            }
+            _done = true;
+            var feel = Proto.Feel.Feel.I;
+            if (feel != null && _player != null)
+                feel.Popup(_player.position + Vector3.up * 2.4f, ItemDb.ColoredName(Item));
+            Collected?.Invoke(Item);
+            Destroy(gameObject);
+        }
+
+        static Transform FindPlayer()
+        {
+            if (_playerCache == null)
+            {
+                var pc = FindFirstObjectByType<Proto.Player.PlayerController>();
+                if (pc != null) _playerCache = pc.transform;
+            }
+            return _playerCache;
+        }
+
+        static Material BeamMat()
+        {
+            if (_beamMat == null)
+            {
+                var sh = Shader.Find("Sprites/Default");
+                _beamMat = new Material(sh) { name = "LootBeam" };
+            }
+            return _beamMat;
+        }
+
+        static Material GemMat()
+        {
+            if (_gemMat == null)
+            {
+                var sh = Shader.Find("Universal Render Pipeline/Unlit");
+                if (sh == null) sh = Shader.Find("Unlit/Color");
+                _gemMat = new Material(sh) { name = "LootGem" };
+            }
+            return _gemMat;
+        }
+    }
+}

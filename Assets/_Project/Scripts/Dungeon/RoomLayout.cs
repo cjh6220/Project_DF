@@ -7,8 +7,9 @@ namespace Proto.Dungeon
     /// 방 배치 하나 (프리팹). 위치: Resources/RoomLayouts/  — 이 폴더에 넣은 프리팹은 저절로 쓰인다.
     ///
     ///   방 종류(kind)가 같은 배치 중 하나를 (판 시드 + 방 좌표)로 고른다 — 같은 방에 다시 오면 같은 배치.
-    ///   배치는 던전과 상관없이 공용이다. 같은 자리에 숲이면 나무, 폐광이면 바위가 놓인다.
-    ///   한 던전 전용 배치를 만들려면 onlyDungeon에 던전 id(forest · mine · snow · rift)를 적는다.
+    ///   테마별 폴더(RoomLayouts/Forest · Mine · SnowTemple · Rift)에 나뉘어 있고, 각 배치의 onlyDungeon이
+    ///   그 던전 id(forest · mine · snow · rift)라 그 던전에서만 뽑힌다. onlyDungeon을 비우면 모든 던전 공용.
+    ///   하위 폴더도 읽는다 (Resources.LoadAll).
     ///
     /// 씬 화면: 흰 사각형 = 싸우는 칸(18×10m), 노란 띠 = 출구 자리. 출구 띠 안에는 장애물을 두지 말 것.
     /// 테두리 나무 · 방 밖 장식은 지금처럼 테마가 자동으로 두른다 — 배치는 칸 안만 정한다.

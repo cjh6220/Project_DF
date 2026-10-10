@@ -20,7 +20,7 @@ namespace Proto.UI
     {
         [SerializeField] RunManager run;
 
-        RectTransform _root, _button;
+        RectTransform _root, _button, _panel;
         Button _no;
         TextMeshProUGUI _buttonLabel;
         bool _open;
@@ -50,6 +50,7 @@ namespace Proto.UI
             _button.pivot = new Vector2(1f, 1f);
             _button.anchoredPosition = new Vector2(-40f, -252f);
             btn.onClick.AddListener(Open);
+            UiFocus.NoNav(btn);
             _buttonLabel = btn.GetComponentInChildren<TextMeshProUGUI>();
 
             // 확인 창
@@ -59,6 +60,7 @@ namespace Proto.UI
 
             var panel = UiKit.Image(_root, "Panel", new Color(0.10f, 0.09f, 0.13f, 0.97f));
             UiKit.Place(panel.rectTransform, new Vector2(0.5f, 0.5f), Vector2.zero, new Vector2(560f, 310f));
+            _panel = panel.rectTransform;
             UiKit.Frame(panel.rectTransform, 0.6f, 0f, UiKit.FrameKind.Dialog);
 
             var title = UiKit.Text(panel.transform, "Title", "던전을 포기할까요?", 34);
@@ -99,11 +101,13 @@ namespace Proto.UI
         {
             if (run == null || run.Phase != RunPhase.InDungeon) return;
             if (SettingsView.IsOpen || SettingsView.ClosedFrame == Time.frameCount) return;   // 설정 창이 Esc를 쓴다
+            if (InventoryView.IsOpen || InventoryView.ClosedFrame >= Time.frameCount - 1) return;   // 장비 창이 Esc를 쓴다
             // Esc / OPTIONS 로 열고 닫는다. 열려 있으면 ○ 로도 닫는다.
             if (GameInput.MenuPressed || (_open && GameInput.CancelPressed))
             {
                 if (_open) Close(); else Open();
             }
+            if (_open) UiFocus.Keep(_panel, _no);   // 빈 곳을 클릭해도 방향키가 계속 먹게
             InputFx.Set(_buttonLabel, $"포기 ({InputGlyphs.Of(Act.Menu)})");
         }
 
@@ -128,6 +132,7 @@ namespace Proto.UI
             _root.gameObject.SetActive(false);
             if (UnityEngine.EventSystems.EventSystem.current != null)
                 UnityEngine.EventSystems.EventSystem.current.SetSelectedGameObject(null);
+            UiFocus.MarkClosed();
             Time.timeScale = 1f;
         }
 

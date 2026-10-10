@@ -120,6 +120,26 @@ namespace Proto.Data
         public string bossName = "실버백";
         public string bossTitle = "숲의 주인";
 
+        [Header("── 몬스터 스킬 ──")]
+        [Tooltip("보스가 쓰는 스킬 (보통 4개). 스킬은 엘리트와 같이 쓴다 — MonsterSkills 참고")]
+        public Proto.Enemy.MonsterSkillId[] bossSkills = { Proto.Enemy.MonsterSkillId.Swipe, Proto.Enemy.MonsterSkillId.Charge, Proto.Enemy.MonsterSkillId.Slam };
+        [Tooltip("엘리트(챔피언) 모델별 스킬 1~2개. 목록에 없는 모델은 평타만 쓴다")]
+        public EliteSkills[] eliteSkills;
+
+        [System.Serializable]
+        public class EliteSkills
+        {
+            public GameObject model;
+            public Proto.Enemy.MonsterSkillId[] skills;
+        }
+
+        public Proto.Enemy.MonsterSkillId[] EliteSkillsFor(GameObject model)
+        {
+            if (eliteSkills == null || model == null) return null;
+            foreach (var e in eliteSkills) if (e != null && e.model == model) return e.skills;
+            return null;
+        }
+
         [Header("── 출구 문 ──")]
         [Tooltip("방과 방을 잇는 문 모델. 비워 두면 마을 도리이를 쓴다. 보스방으로 가는 문은 같은 모델을 검붉게 칠한다")]
         public GameObject doorModel;

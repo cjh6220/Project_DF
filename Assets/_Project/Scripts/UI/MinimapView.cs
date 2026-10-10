@@ -66,16 +66,26 @@ namespace Proto.UI
             var map = run.Map;
             if (map == null) return;
 
+            // 판 크기가 매번 달라도 틀 한가운데에 놓는다 (너무 크면 틀에 맞게 줄인다)
+            float frameW = grid.rect.width, frameH = grid.rect.height;
+            float totW = map.Width * cellSize + (map.Width - 1) * cellGap;
+            float totH = map.Height * cellSize + (map.Height - 1) * cellGap;
+            float fit = Mathf.Min(1f, (frameW - 24f) / totW, (frameH - 24f) / totH);
+            float cs = cellSize * fit, gap = cellGap * fit;
+            float ox = (frameW - totW * fit) * 0.5f, oy = (frameH - totH * fit) * 0.5f;
+
             for (int x = 0; x < map.Width; x++)
             for (int y = 0; y < map.Height; y++)
             {
                 var go = Instantiate(cellPrefab, grid);
                 go.SetActive(true);
                 var rt = (RectTransform)go.transform;
-                rt.sizeDelta = new Vector2(cellSize, cellSize);
+                rt.anchorMin = rt.anchorMax = Vector2.zero;
+                rt.pivot = Vector2.zero;
+                rt.sizeDelta = new Vector2(cs, cs);
                 rt.anchoredPosition = new Vector2(
-                    x * (cellSize + cellGap),
-                    y * (cellSize + cellGap));
+                    ox + x * (cs + gap),
+                    oy + y * (cs + gap));
                 _cells[new Vector2Int(x, y)] = go.GetComponent<Image>();
             }
             Rebuild();

@@ -152,7 +152,7 @@ namespace Proto.Dungeon
 
                 if (r.Kind == RoomKind.Entry)
                 {
-                    r.EnemyCount = 0; r.OreCount = 0;
+                    r.EnemyCount = 0;
                     continue;
                 }
 
@@ -167,17 +167,15 @@ namespace Proto.Dungeon
                         r.Champions.Add(Proto.Enemy.Affixes.Roll(rng));
                 }
 
-                // 여기가 핵심 — 우회로(가지)에 광맥을 몰아준다
-                var range = r.OnMainPath ? cfg.oresOnMainPath : cfg.oresOnBranch;
-                r.OreCount = rng.Next(range.x, range.y + 1);
-
                 bool deadEnd = CountExits(r) == 1 && !r.OnMainPath;
 
                 // 막다른 길이면 보물방으로 승격 (탐색에 확실한 보상을 준다)
                 if (deadEnd && r.Kind == RoomKind.Normal && rng.NextDouble() < 0.4)
                 {
                     r.Kind = RoomKind.Treasure;
-                    r.OreCount += 1;
+                    // 보물방 — 상자를 지키는 중간보스(RoomController가 세운다) + 졸개 둘까지
+                    r.EnemyCount = Mathf.Min(r.EnemyCount, 2);
+                    r.Champions.Clear();
                 }
 
                 // 챔피언이 둘 이상이면 엘리트방으로 표시한다

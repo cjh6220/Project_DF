@@ -27,6 +27,10 @@ namespace Proto.Core
         public List<int> skillLevels = new();
         public List<string> slots = new();
 
+        // 장비 — 가방과 장착한 것 모두 items에, 장착 칸은 uid로 (부위 순서)
+        public List<Item> items = new();
+        public List<string> equipped = new();
+
         // 던전
         public List<string> cleared = new();
         public List<string> seen = new();
@@ -84,10 +88,17 @@ namespace Proto.Core
         {
             run.Bank.Clear();
             for (int i = 0; i < d.resIds.Count && i < d.resAmounts.Count; i++)
-                if (Enum.TryParse(d.resIds[i], out ResourceId id)) run.Bank.Add(id, d.resAmounts[i]);
+            {
+                // 채광 제거 이전 저장 — 원석·결정은 정수로, 이질체는 핵으로 옮긴다
+                string rn = d.resIds[i];
+                if (rn == "Ore" || rn == "Crystal") rn = "Essence";
+                else if (rn == "Alien") rn = "Core";
+                if (Enum.TryParse(rn, out ResourceId id)) run.Bank.Add(id, d.resAmounts[i]);
+            }
 
             run.Progression.Import(d.nodeIds, d.nodeLevels);
             run.Skills.Import(d.skillNames, d.skillLevels, d.slots, d.sp);
+            run.Inventory.Import(d.items, d.equipped);
             run.ImportSave(d.cleared, d.bestRooms);
             if (village != null) village.ImportSave(d.target, d.seen);
         }
@@ -106,6 +117,7 @@ namespace Proto.Core
 
             run.Progression.Export(d.nodeIds, d.nodeLevels);
             run.Skills.Export(d.skillNames, d.skillLevels, d.slots, out d.sp);
+            run.Inventory.Export(d.items, d.equipped);
             d.cleared.AddRange(run.ClearedIds);
             d.bestRooms = run.BestRooms;
             if (village != null) { d.seen.AddRange(village.SeenIds); d.target = village.TargetId; }

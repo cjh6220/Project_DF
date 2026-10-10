@@ -16,7 +16,7 @@ namespace Proto.Enemy
     /// </summary>
     [RequireComponent(typeof(CharacterController))]
     [RequireComponent(typeof(Health))]
-    public class EnemyController : MonoBehaviour
+    public class EnemyController : MonoBehaviour, IMonsterBody
     {
         [SerializeField] TuningConfig cfg;
         [SerializeField] Renderer visual;
@@ -34,6 +34,33 @@ namespace Proto.Enemy
 
         /// <summary>넉백 속도. 경직 시간 동안 이 속도로 밀려난다.</summary>
         Vector3 _knockVel;
+
+        /// <summary>띄워진 상태 — 위로 솟는 속도. 땅에 닿을 때까지 아무것도 못 한다.</summary>
+        float _vy;
+        bool _airborne;
+        const float Gravity = 22f;          // 던파처럼 가볍게 뜬다
+        const float ApexSlow = 0.45f;       // 꼭대기(|vy| < 2.5)에서는 중력을 줄여 잠깐 머문다
+        const float JuggleLift = 4.2f;      // 공중에서 맞으면 다시 살짝 뜬다 (맞을수록 줄어든다)
+        int _juggles;
+        bool _bounced;
+        float _downUntil;
+
+        /// <summary>띄워져 있다 (EnemyVisual이 몸을 젖힌다).</summary>
+        public bool Airborne => _airborne;
+        /// <summary>떨어져 누워 있다.</summary>
+        public bool Downed => !_airborne && Time.time < _downUntil;
+        public float AirVy => _vy;
+
+        // ── 엘리트 스킬 (StageTheme.eliteSkills에서 받는다) ──
+        MonsterSkillId[] _skills;
+        readonly System.Collections.Generic.Dictionary<MonsterSkillId, float> _skillReady = new();
+        readonly System.Collections.Generic.List<Telegraph> _telegraphs = new();
+        Coroutine _skillRoutine;
+        bool _casting, _skillCanceled;
+        float _nextSkillTry;
+        Vector3 _arenaCenter; Vector2 _arenaHalf = new Vector2(9f, 5f);
+        /// <summary>엘리트는 평타도 쓰므로 스킬 재사용을 보스보다 길게.</summary>
+        const float EliteCooldownMul = 2.5f;
 
         Affix _affix = Affix.None;
         AffixDef _def = Affixes.Normal;
@@ -76,8 +103,25 @@ namespace Proto.Enemy
             SetColor(_def.Color);
         }
 
+        /// <summary>보물방 중간보스로 키운다 — 접두사 챔피언 위에 체력 · 피해 · 크기를 더 얹고 슈퍼아머.</summary>
+        public void MakeGuardian(float healthMul = 5f, float damageMul = 1.4f, float scaleMul = 1.3f)
+        {
+            IsGuardian = true;
+            _def.Name = "보물 수호자";
+            _def.HealthMul *= healthMul;
+            _def.DamageMul *= damageMul;
+            _def.ScaleMul *= scaleMul;
+            _def.SuperArmor = true;
+            _health.Configure(cfg.enemyHealth * _def.HealthMul);
+            transform.localScale = Vector3.one * _def.ScaleMul;
+        }
+
+        /// <summary>보물방 중간보스인가.</summary>
+        public bool IsGuardian { get; private set; }
+
         void Update()
         {
+            if (_airborne || _vy > 0f) { TickAir(); return; }   // 죽었어도 공중이면 떨어진다
             if (_health.IsDead || _player == null || cfg == null) return;
 
             // 넉백 — 밀려나는 동안은 아무것도 못 한다.
@@ -88,6 +132,8 @@ namespace Proto.Enemy
                 if (_knockVel.sqrMagnitude > 0.0001f) _cc.Move(_knockVel * Time.deltaTime);
                 return;
             }
+
+            if (_casting) return;   // 스킬 쓰는 중 — 스킬이 몸을 움직인다
 
             var to = _player.position - transform.position;
             to.y = 0f;
@@ -112,6 +158,14 @@ namespace Proto.Enemy
                 return;
             }
 
+            // 엘리트 — 쓸 만한 스킬이 있으면 평타 대신 쓴다 (0.5초마다 한 번 본다)
+            if (_skills != null && Time.time >= _nextSkillTry)
+            {
+                _nextSkillTry = Time.time + 0.5f;
+                var s = PickSkill();
+                if (s != MonsterSkillId.None) { _skillRoutine = StartCoroutine(CastSkill(s)); return; }
+            }
+
             float speed = cfg.enemyMoveSpeed * _def.SpeedMul;
             if (Time.time < _hasteUntil) speed *= cfg.howlHasteMultiplier;
 
@@ -123,6 +177,43 @@ namespace Proto.Enemy
             {
                 _windupUntil = Time.time + cfg.enemyWindup;
                 Attacked?.Invoke();
+            }
+        }
+
+        /// <summary>
+        /// 스킬이 기본 넉백 대신 쓰는 반응. TakeDamage 뒤에 부른다.
+        ///   knockVel 밀리는 속도 · stun 경직 · lift 위로 띄우는 속도 (0이면 안 띄움)
+        /// 슈퍼아머는 무시한다.
+        /// </summary>
+        public void ApplyHit(Vector3 knockVel, float stun, float lift)
+        {
+            if (_def.SuperArmor) return;
+            _knockVel = knockVel; _knockVel.y = 0f;
+            _stunUntil = Time.time + stun;
+            if (lift > 0f)
+            {
+                // 이미 떠 있으면 더 띄우되 처음만큼은 아니다
+                if (_airborne) _vy = Mathf.Max(_vy, lift * 0.8f);
+                else { _vy = lift; _juggles = 0; }
+                _airborne = true; _bounced = false;
+            }
+            else if (_airborne) _knockVel *= 0.3f;
+        }
+
+        void TickAir()
+        {
+            float dt = Time.deltaTime;
+            _vy -= (Mathf.Abs(_vy) < 2.5f ? Gravity * ApexSlow : Gravity) * dt;
+            var v = _knockVel * 0.6f; v.y = _vy;
+            _cc.Move(v * dt);
+            if (_vy < 0f && _cc.isGrounded)
+            {
+                // 세게 떨어지면 바닥에 한 번 튕긴다
+                if (!_bounced && _vy < -7f) { _bounced = true; _vy = 3.2f; _knockVel *= 0.5f; return; }
+                // 떨어진 뒤 잠깐 누워 있다
+                _airborne = false; _vy = 0f; _knockVel = Vector3.zero; _juggles = 0;
+                _downUntil = Time.time + 0.6f;
+                _stunUntil = Mathf.Max(_stunUntil, _downUntil + 0.15f);
             }
         }
 
@@ -145,6 +236,9 @@ namespace Proto.Enemy
             // '강건한' 접두사만 여기 해당한다. 다른 챔피언은 일반과 똑같이 밀린다.
             if (_def.SuperArmor) return;
 
+            // 스킬도 맞으면 끊긴다 — 예고를 보고 먼저 때리면 막을 수 있다
+            if (_casting) CancelSkill();
+
             // 준비하던 공격은 끊긴다. 먼저 때리면 안 맞는다.
             if (_windupUntil > 0f)
             {
@@ -159,6 +253,14 @@ namespace Proto.Enemy
             _knockVel = push.sqrMagnitude > 0.001f
                 ? push.normalized * (cfg.enemyKnockback / Mathf.Max(0.01f, cfg.enemyHitStun))
                 : Vector3.zero;
+
+            // 공중 콤보 — 떠 있는 적은 맞을 때마다 살짝 다시 뜨고, 옆으로는 덜 밀린다
+            if (_airborne)
+            {
+                _vy = Mathf.Max(_vy, JuggleLift * Mathf.Pow(0.75f, _juggles));
+                _juggles++;
+                _knockVel *= 0.3f;
+            }
         }
 
         Transform _body;
@@ -180,6 +282,7 @@ namespace Proto.Enemy
 
         void OnDied()
         {
+            if (_casting) CancelSkill();
             _windupUntil = 0f;
             _knockVel = Vector3.zero;
             if (_def.ExplodeOnDeath) Explode();
@@ -212,6 +315,81 @@ namespace Proto.Enemy
                 if (e == this) continue;
                 e.ApplyHaste(cfg.howlHasteDuration);
             }
+        }
+
+        // ───────────────────────────── 엘리트 스킬 ─────────────────────────────
+
+        public void SetSkills(MonsterSkillId[] skills)
+        {
+            _skills = skills != null && skills.Length > 0 ? skills : null;
+            _skillReady.Clear();
+            _nextSkillTry = Time.time + 2f;   // 나오자마자 쓰지 않는다
+        }
+
+        public void SetArena(Vector3 center, Vector2 half) { _arenaCenter = center; _arenaHalf = half; }
+
+        MonsterSkillId PickSkill()
+        {
+            float total = 0f;
+            var w = new float[_skills.Length];
+            for (int i = 0; i < _skills.Length; i++)
+            {
+                var s = _skills[i];
+                if (s == MonsterSkillId.None) continue;
+                if (_skillReady.TryGetValue(s, out var t) && Time.time < t) continue;
+                w[i] = MonsterSkills.Weight(s, this);
+                total += w[i];
+            }
+            if (total <= 0f || Random.value < 0.4f) return MonsterSkillId.None;   // 늘 쓰지는 않는다
+            float r = Random.value * total;
+            for (int i = 0; i < _skills.Length; i++) { r -= w[i]; if (w[i] > 0f && r <= 0f) return _skills[i]; }
+            return MonsterSkillId.None;
+        }
+
+        System.Collections.IEnumerator CastSkill(MonsterSkillId s)
+        {
+            _casting = true; _skillCanceled = false;
+            _skillReady[s] = Time.time + Mathf.Max(3f, MonsterSkills.Cooldown(s) * EliteCooldownMul);
+            yield return MonsterSkills.Run(s, this);
+            _casting = false;
+            _attackReadyAt = Time.time + cfg.enemyAttackCooldown * 0.6f;
+        }
+
+        void CancelSkill()
+        {
+            _skillCanceled = true;
+            _casting = false;
+            if (_skillRoutine != null) StopCoroutine(_skillRoutine);
+            _skillRoutine = null;
+            foreach (var tg in _telegraphs) if (tg != null) tg.Cancel();
+            _telegraphs.Clear();
+            AttackCanceled?.Invoke();
+        }
+
+        // IMonsterBody
+        public Transform Root => transform;
+        public Transform Player => _player;
+        public TuningConfig Cfg => cfg;
+        public float Tempo => 1f;
+        public float Reach => 0.6f * transform.localScale.x;
+        public float Power => cfg.enemyDamage * _def.DamageMul * 1.6f / Mathf.Max(1f, cfg.bossSwipeDamage);
+        public bool Stopped => _health.IsDead || _skillCanceled;
+        public Vector3 ArenaCenter => _arenaCenter;
+        public Vector2 ArenaHalf => _arenaHalf;
+        public float HeadHeight => _cc.height * transform.localScale.y + 0.3f;
+        public void Face(Vector3 dir) { dir.y = 0f; if (dir.sqrMagnitude > 0.0001f) LookDirection = dir.normalized; }
+        public void Move(Vector3 delta) => _cc.Move(delta);
+        public void Anim(string state, float speed) { if (state == "Attack") Attacked?.Invoke(); }
+        public Telegraph Track(Telegraph tg) { _telegraphs.Add(tg); return tg; }
+        public void Untrack(Telegraph tg) { _telegraphs.Remove(tg); }
+        public void HitPlayer(float damage, float shake)
+        {
+            var hp = _player != null ? _player.GetComponent<Health>() : null;
+            if (hp != null) hp.TakeDamage(damage, transform.position);
+        }
+        public void Stagger(float seconds)
+        {
+            if (Proto.Feel.Feel.I != null) Proto.Feel.Feel.I.Popup(transform.position + Vector3.up * HeadHeight, "휘청!");
         }
 
         public void ApplyHaste(float duration)

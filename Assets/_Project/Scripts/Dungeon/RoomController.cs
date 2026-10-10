@@ -4,13 +4,14 @@ using UnityEngine;
 using Proto.Core;
 using Proto.Data;
 using Proto.Enemy;
-using Proto.Mining;
 
 namespace Proto.Dungeon
 {
     /// <summary>
     /// 씬에 실제로 존재하는 방 하나. 프로토타입에서는 아레나 하나를 재활용하고
-    /// 내용물(적·광맥·출구)만 갈아끼운다.
+    /// 내용물(적·보물상자·떨어진 장비·출구)만 갈아끼운다.
+    ///
+    /// 보물방: 상자를 지키는 중간보스(보물 수호자)가 나온다. 수호자를 쓰러뜨려야 상자가 열린다.
     ///
     /// 방 클리어 조건: 몬스터 전멸. 전투는 선택이 아니라 통행료다.
     /// </summary>
@@ -19,7 +20,6 @@ namespace Proto.Dungeon
         [SerializeField] TuningConfig cfg;
         [SerializeField] Transform contentRoot;
         [SerializeField] GameObject enemyPrefab;
-        [SerializeField] GameObject orePrefab;
         [SerializeField] GameObject exitPrefab;
         [SerializeField] Vector2 arenaSize = new Vector2(18f, 10f);
         [SerializeField] RoomDecorator decorator;
@@ -71,9 +71,20 @@ namespace Proto.Dungeon
         public event Action Clearedchanged;
         public event Action<bool> EnemyKilled;   // (elite)
         public event Action<Dir> ExitUsed;
-        public event Action<OreNode> OreMined;
         /// <summary>보스를 쓰러뜨린 순간.</summary>
         public event Action BossKilled;
+        /// <summary>몬스터가 쓰러진 자리 (장비 드랍용).</summary>
+        public event Action<Vector3, bool> EnemyDiedAt;
+        /// <summary>보물상자를 열었다 — 상자 자리.</summary>
+        public event Action<Vector3> ChestOpened;
+        /// <summary>떨어진 장비를 가방에 넣어 본다 — 꽉 찼으면 false (RunManager가 넣는다).</summary>
+        public Func<Item, bool> PickupHandler;
+        /// <summary>가방에 자리가 있나.</summary>
+        public Func<bool> HasBagRoom;
+
+        readonly List<LootDrop> _loot = new();
+        TreasureChest _chest;
+        static GameObject _chestPrefab;
 
         /// <summary>
         /// 플레이어가 이 방에 들어섰을 때 서는 자리.
@@ -99,12 +110,14 @@ namespace Proto.Dungeon
         {
             ClearContents();
             _room = room;
+            if (telegraphMaterial != null) Telegraph.SetMaterial(telegraphMaterial);   // 엘리트 스킬도 바닥 예고를 쓴다
 
             // 한 번 비운 방은 비워진 채로 남는다.
             // 되살아나면 되돌아가는 길이 또 통행료를 받는 셈이고,
             // 무한 파밍이 되어 피로도라는 예산 자체가 무의미해진다.
             bool bossRoom = room.Kind == RoomKind.Boss;
-            Cleared = room.Cleared || (!bossRoom && (room.EnemyCount + room.Champions.Count) == 0);
+            bool treasure = room.Kind == RoomKind.Treasure;
+            Cleared = room.Cleared || (!bossRoom && !treasure && (room.EnemyCount + room.Champions.Count) == 0);
             _entry = EntryPointFor(enteredFrom);
             _layout = RoomLayout.Pick(room.Kind, DungeonId, runSeed, room.Cell);
             _freeEnemySlots.Clear();
@@ -114,12 +127,17 @@ namespace Proto.Dungeon
             if (decorator != null)
                 decorator.Decorate(room.Cell, room.Exits, _entry, runSeed, _layout);
 
+            if (treasure) SpawnChest(room, player);
+            RestoreGroundLoot(room);
             if (!Cleared)
             {
                 if (bossRoom) SpawnBoss(player);
-                else SpawnEnemies(room, player);
+                else
+                {
+                    SpawnEnemies(room, player);
+                    if (treasure) SpawnGuardian(player);
+                }
             }
-            SpawnOres(room);
             SpawnExits(room);
             RefreshExits();
         }
@@ -135,15 +153,16 @@ namespace Proto.Dungeon
                 SpawnOne(player, affix);
         }
 
-        void SpawnOne(Transform player, Proto.Enemy.Affix affix)
+        EnemyController SpawnOne(Transform player, Proto.Enemy.Affix affix, Vector3? at = null)
         {
-            var pos = EnemySpawnPoint();
+            var pos = at ?? EnemySpawnPoint();
             var go = Instantiate(enemyPrefab, pos, Quaternion.identity, contentRoot);
             go.SetActive(true);
             _spawned.Add(go);
 
             // 테마에서 모델을 뽑아 붙인다. 없으면 프리팹에 붙어 있는 것을 그대로 쓴다.
             var ev = go.GetComponent<Proto.Enemy.EnemyVisual>();
+            GameObject chosen = null;
             if (ev != null && decorator != null && decorator.Theme != null)
             {
                 bool champion = affix != Proto.Enemy.Affix.None;
@@ -151,11 +170,21 @@ namespace Proto.Dungeon
                          ? decorator.Theme.championModels
                          : decorator.Theme.enemyModels;
                 if (pool != null && pool.Length > 0)
-                    ev.SetModel(pool[UnityEngine.Random.Range(0, pool.Length)]);
+                {
+                    chosen = pool[UnityEngine.Random.Range(0, pool.Length)];
+                    ev.SetModel(chosen);
+                }
             }
 
             var ec = go.GetComponent<EnemyController>();
-            if (ec != null) ec.Configure(cfg, player, affix);
+            if (ec != null)
+            {
+                ec.Configure(cfg, player, affix);
+                ec.SetArena(contentRoot.position, arenaSize * 0.5f);
+                // 엘리트(챔피언)만 스킬을 쓴다 — 모델마다 테마에서 정한 1~2개
+                if (affix != Proto.Enemy.Affix.None && decorator != null && decorator.Theme != null)
+                    ec.SetSkills(decorator.Theme.EliteSkillsFor(chosen));
+            }
 
             var hp = go.GetComponent<Health>();
             if (hp != null)
@@ -164,7 +193,135 @@ namespace Proto.Dungeon
                 bool champion = affix != Proto.Enemy.Affix.None;
                 hp.Died += () => OnEnemyDied(hp, go, champion);
             }
+            return ec;
         }
+
+        // ───────────────────────────── 보물방 ─────────────────────────────
+
+        Vector3 _chestPoint;
+
+        /// <summary>
+        /// 상자 자리 — 방 가운데에서 입구 반대쪽으로 조금. 배치의 큰 바위 · 나무에 묻히지 않게
+        /// 후보 몇 군데 중 장애물에서 충분히 떨어진 첫 자리를 고른다.
+        /// </summary>
+        Vector3 FindChestPoint()
+        {
+            Vector3 center = contentRoot.position;
+            Vector3 away = center - _entry; away.y = 0f;
+            away = away.sqrMagnitude > 0.01f ? away.normalized : Vector3.forward;
+            var side = new Vector3(away.z, 0f, -away.x);
+            var cands = new[]
+            {
+                center + away * 2.6f, center + away * 1.2f, center,
+                center + away * 2.6f + side * 3f, center + away * 2.6f - side * 3f,
+                center + side * 4.5f, center - side * 4.5f,
+                center + away * 3.4f + side * 6f, center + away * 3.4f - side * 6f,
+            };
+            if (_layout == null) return cands[0];
+            var theme = decorator != null ? decorator.Theme : null;
+            float big = theme != null ? theme.bigObstacleSize : 3f;
+            Vector3 best = cands[0]; float bestGap = float.MinValue;
+            foreach (var c in cands)
+            {
+                float gap = float.MaxValue;
+                foreach (var sl in _layout.Slots(SlotKind.Obstacle))
+                {
+                    var lp = sl.transform.localPosition;
+                    var w = contentRoot.position + new Vector3(lp.x, 0f, lp.z);
+                    float r = sl.big ? big * sl.scale * 0.5f : 0.8f * sl.scale;
+                    gap = Mathf.Min(gap, Vector3.Distance(c, w) - r);
+                }
+                if (gap >= 1.4f) return c;
+                if (gap > bestGap) { bestGap = gap; best = c; }
+            }
+            return best;
+        }
+
+        Vector3 ChestPoint() => _chestPoint;
+
+        void SpawnChest(Room room, Transform player)
+        {
+            if (_chestPrefab == null) _chestPrefab = Resources.Load<GameObject>("Props/TreasureChest");
+            _chestPoint = FindChestPoint();
+            var pos = _chestPoint;
+            var go = _chestPrefab != null ? Instantiate(_chestPrefab, pos, Quaternion.identity, contentRoot) : new GameObject("TreasureChest");
+            go.transform.SetParent(contentRoot, true);
+            go.transform.position = pos;
+            // 상자 앞면이 입구(플레이어) 쪽을 보게
+            var face = _entry - pos; face.y = 0f;
+            if (face.sqrMagnitude > 0.01f) go.transform.rotation = Quaternion.LookRotation(face.normalized);
+            go.SetActive(true);
+            _spawned.Add(go);
+            _chest = go.GetComponent<TreasureChest>();
+            if (_chest == null) _chest = go.AddComponent<TreasureChest>();
+            _chest.Setup(player, room.ChestOpened, room.Cleared);
+            _chest.Opened += () =>
+            {
+                if (_room != null) _room.ChestOpened = true;
+                ChestOpened?.Invoke(_chest.transform.position);
+            };
+        }
+
+        /// <summary>보물 수호자 — 챔피언 접두사 + 큰 체력 · 슈퍼아머. 상자 바로 앞에 선다.</summary>
+        void SpawnGuardian(Transform player)
+        {
+            var pool = new[] { Proto.Enemy.Affix.Stalwart, Proto.Enemy.Affix.Giant, Proto.Enemy.Affix.Armored, Proto.Enemy.Affix.Howling };
+            var affix = pool[UnityEngine.Random.Range(0, pool.Length)];
+            var chestPos = ChestPoint();
+            var toEntry = _entry - chestPos; toEntry.y = 0f;
+            var pos = chestPos + (toEntry.sqrMagnitude > 0.01f ? toEntry.normalized * 1.8f : Vector3.back * 1.8f);
+            var ec = SpawnOne(player, affix, pos);
+            if (ec == null) return;
+            ec.MakeGuardian();
+            var hp = ec.GetComponent<Health>();
+            if (hp != null) hp.Died += () => { if (_chest != null) _chest.Unlock(); };
+            if (Proto.Feel.Feel.I != null) Proto.Feel.Feel.I.Popup(ec.transform.position + Vector3.up * 3.2f, "보물 수호자");
+        }
+
+        // ───────────────────────────── 떨어진 장비 ─────────────────────────────
+
+        /// <summary>장비 하나를 바닥에 떨군다. order는 상자에서 여러 개가 튈 때 퍼지는 순서.</summary>
+        public void SpawnLoot(Item item, Vector3 pos, int order)
+        {
+            if (item == null) return;
+            var fwd = order > 0 && _chest != null ? _chest.transform.forward : Vector3.forward;
+            Track(LootDrop.Spawn(item, pos, order, contentRoot, fwd));
+        }
+
+        void Track(LootDrop drop)
+        {
+            drop.TryPickup = it => PickupHandler == null || PickupHandler(it);
+            drop.HasRoom = () => HasBagRoom == null || HasBagRoom();
+            drop.Collected += _ => _loot.Remove(drop);
+            _loot.Add(drop);
+        }
+
+        /// <summary>전에 못 주운 장비를 그 자리에 다시 놓는다.</summary>
+        void RestoreGroundLoot(Room room)
+        {
+            if (room.GroundLoot == null || room.GroundLoot.Count == 0) return;
+            var list = new List<GroundItem>(room.GroundLoot);
+            room.GroundLoot.Clear();
+            foreach (var g in list) if (g.Item != null) Track(LootDrop.SpawnResting(g.Item, contentRoot.position + g.Pos, contentRoot));
+        }
+
+        /// <summary>
+        /// 방을 떠난다 — 날아오는 중이면 가방에 넣고(자리가 있으면), 못 주운 것은 이 방 바닥에 남긴다.
+        /// </summary>
+        void FlushLoot()
+        {
+            var left = new List<LootDrop>(_loot);
+            _loot.Clear();
+            foreach (var d in left)
+            {
+                if (d == null) continue;
+                d.CollectNow();
+                if (!d.Done && d.Item != null && _room != null)
+                    _room.GroundLoot.Add(new GroundItem { Item = d.Item, Pos = d.RestPosition - contentRoot.position });
+                Destroy(d.gameObject);
+            }
+        }
+
 
         /// <summary>
         /// 보스방 — 일반 몬스터 없이 보스 하나. 입구 반대편에 선다.
@@ -196,6 +353,7 @@ namespace Proto.Dungeon
                 theme != null ? theme.bossScale : 2f,
                 theme != null ? theme.bossName : "보스",
                 theme != null ? theme.bossTitle : "");
+            if (theme != null) boss.SetSkills(theme.bossSkills);
 
             _enemies.Add(hp);
             hp.Died += () =>
@@ -208,50 +366,6 @@ namespace Proto.Dungeon
                 BossKilled?.Invoke();
                 // 시체는 치우지 않는다 — 쓰러진 보스를 보는 것도 보상이다
             };
-        }
-
-        void SpawnOres(Room room)
-        {
-            // 처음 들어온 방이면 광맥 자리를 정한다. 한 번 정하면 그대로 간다.
-            if (room.Ores == null)
-            {
-                room.Ores = new List<OreSpot>();
-                var oreSlots = _layout != null ? _layout.Slots(SlotKind.Ore) : new List<LayoutSlot>();
-                for (int i = 0; i < room.OreCount; i++)
-                {
-                    // 깊은 방일수록 상급 광맥 확률이 오른다
-                    int depth = room.Cell.y;
-                    float roll = UnityEngine.Random.value;
-                    OreGrade grade =
-                        roll < 0.08f + depth * 0.02f ? OreGrade.Rare :
-                        roll < 0.35f + depth * 0.05f ? OreGrade.Deep :
-                        OreGrade.Common;
-
-                    room.Ores.Add(new OreSpot {
-                        LocalPos = (i < oreSlots.Count ? new Vector3(oreSlots[i].transform.localPosition.x, 0f, oreSlots[i].transform.localPosition.z) : RandomPoint(0.8f)) - contentRoot.position,
-                        Grade = grade,
-                        Amount = grade == OreGrade.Rare ? 1 : UnityEngine.Random.Range(1, 3)
-                    });
-                }
-            }
-
-            foreach (var spot in room.Ores)
-            {
-                if (spot.Mined) continue;   // 이미 캐 간 자리
-
-                var go = Instantiate(orePrefab, contentRoot.position + spot.LocalPos,
-                                     Quaternion.identity, contentRoot);
-                go.SetActive(true);
-                _spawned.Add(go);
-
-                var ore = go.GetComponent<OreNode>();
-                if (ore == null) continue;
-
-                ore.Configure(spot.Grade, spot.Amount);
-
-                var captured = spot;
-                ore.Mined += o => { captured.Mined = true; OreMined?.Invoke(o); };
-            }
         }
 
         void SpawnExits(Room room)
@@ -295,6 +409,9 @@ namespace Proto.Dungeon
         {
             _enemies.Remove(hp);
             EnemyKilled?.Invoke(elite);
+            // 수호자는 상자가 보상이다 — 따로 굴리지 않는다
+            var ec = go != null ? go.GetComponent<EnemyController>() : null;
+            if (ec == null || !ec.IsGuardian) EnemyDiedAt?.Invoke(go != null ? go.transform.position : contentRoot.position, elite);
 
             // 바로 끄면 죽는 모션이 안 보인다. 잠깐 남겨 두고 치운다.
             // EnemyController는 이미 IsDead를 보고 멈추므로 시체가 움직이지는 않는다.
@@ -306,6 +423,7 @@ namespace Proto.Dungeon
             {
                 Cleared = true;
                 if (_room != null) _room.Cleared = true;
+                if (_chest != null) _chest.Unlock();
                 RefreshExits();
                 Clearedchanged?.Invoke();
             }
@@ -387,6 +505,8 @@ namespace Proto.Dungeon
 
         void ClearContents()
         {
+            FlushLoot();
+            _chest = null;
             foreach (var go in _spawned) if (go != null) Destroy(go);
             _spawned.Clear();
             _enemySpots.Clear();

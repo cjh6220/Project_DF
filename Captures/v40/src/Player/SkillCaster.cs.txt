@@ -1,0 +1,561 @@
+using System;
+using System.Collections.Generic;
+using UnityEngine;
+using Proto.Core;
+
+namespace Proto.Player
+{
+    /// <summary>
+    /// 스킬 발동 — 커맨드 판정 · 퀵슬롯 · 재사용 · 스킬별 동작.
+    ///
+    /// 커맨드
+    ///   방향키를 누른 순간들을 기억해 두었다가 Z(스킬)·X(공격)를 누르면 맞는 스킬을 찾는다.
+    ///   키 사이 간격이 설정의 '커맨드 입력 여유'(기본 0.35초) 안이어야 한 커맨드로 친다.
+    ///   방향은 첫 키를 누를 때 바라보던 쪽 기준 — 뒤로 누르면 몸이 돌지만 커맨드는 '뒤'로 읽는다 (← X 반격 자세).
+    ///   그렇게 읽어서 맞는 게 없으면 지금 바라보는 쪽 기준으로 한 번 더 찾는다 (돌아서서 → Z 돌진).
+    ///   여러 개가 맞으면 긴 커맨드가 이긴다 (↓→ Z 발도술이 → Z 돌진보다 먼저).
+    ///   맞는 게 없을 때 Z = 내려찍기, X = 평타.
+    /// 퀵슬롯
+    ///   A S D F (패드 R1 + 버튼) — 커맨드 없이 그 칸의 스킬. 누르고 있는 방향으로 돌아서 쓴다.
+    ///
+    /// 시간은 전부 클립 시간(초). 실제 시간 = 클립 시간 / Speed. 판정 시각은 손 속도가 가장 빠른 순간을 재서 맞췄다.
+    /// 숫자를 바꾸려면 아래 Specs 표를 고친다.
+    /// </summary>
+    [DefaultExecutionOrder(-50)]   // PlayerController보다 먼저 — 방향키에 몸이 돌기 전에 커맨드를 기록한다
+    public class SkillCaster : MonoBehaviour
+    {
+        // ───────────────────────────── 스킬 표 ─────────────────────────────
+
+        enum Kind { Melee, Wave, Counter, WarCry, Sprint }
+        enum Shape { Front, Around }
+
+        class Hit
+        {
+            public float At, Mul = 1f;
+            public Shape Shape = Shape.Front;
+            public float Reach = 2.4f, Depth = 1.1f;   // Front: 앞으로 Reach m, 깊이 ±Depth m · Around: 반경 Reach m
+            public float Knock = 0.6f, Stun = 0.3f, Lift;
+            public bool Heavy;
+            public int MinLevel = 1;                    // 이 레벨부터 나가는 타 (회전베기 · 연속 찌르기 '타수 +1')
+        }
+
+        class Spec
+        {
+            public string Name, State;
+            public Kind Kind = Kind.Melee;
+            public float Speed = 1f, Offset, End, Cooldown, CooldownPerLevel;
+            public float MoveFrom, MoveTo, MoveDist, MoveDistPerLevel;
+            public float DamagePerLevel = 0.15f;
+            public Hit[] Hits = Array.Empty<Hit>();
+            public int Book = -1;   // SkillBook.All 번호
+        }
+
+        static readonly Spec[] Specs =
+        {
+            // 돌진베기 → Z — 3.5m 돌진하며 벤다
+            new Spec { Name = "돌진베기", State = "Skill_Dash", Speed = 1.15f, End = 0.80f, Cooldown = 4f,
+                       MoveFrom = 0.0f, MoveTo = 0.34f, MoveDist = 3.5f, MoveDistPerLevel = 0.5f,
+                       Hits = new[] { new Hit { At = 0.30f, Mul = 2.0f, Reach = 2.6f, Knock = 1.2f, Stun = 0.4f } } },
+            // 올려베기 ↑ X — 띄운다
+            new Spec { Name = "올려베기", State = "Skill_Upper", Speed = 1.2f, End = 0.95f, Cooldown = 5f,
+                       Hits = new[] { new Hit { At = 0.35f, Mul = 1.8f, Reach = 2.3f, Knock = 0.3f, Stun = 0.5f, Lift = 9f } } },
+            // 내려찍기 Z — 뛰어올라 내려친다, 주변 다운
+            new Spec { Name = "내려찍기", State = "Skill_Slam", Speed = 1.45f, End = 1.55f, Cooldown = 3f,
+                       MoveFrom = 0.55f, MoveTo = 1.05f, MoveDist = 1.2f,
+                       Hits = new[] { new Hit { At = 1.08f, Mul = 2.2f, Shape = Shape.Front, Reach = 2.8f, Depth = 1.6f, Knock = 0.8f, Stun = 0.8f, Heavy = true } } },
+            // 회전베기 ↓↑ Z — 제자리에서 돌며 주변을 여러 번 (레벨마다 +1타)
+            new Spec { Name = "회전베기", State = "Skill_Whirl", Speed = 1.2f, End = 1.45f, Cooldown = 8f,
+                       Hits = new[] {
+                           new Hit { At = 0.35f, Mul = 0.9f, Shape = Shape.Around, Reach = 2.6f, Knock = 0.25f, Stun = 0.35f },
+                           new Hit { At = 0.55f, Mul = 0.9f, Shape = Shape.Around, Reach = 2.6f, Knock = 0.25f, Stun = 0.35f },
+                           new Hit { At = 0.75f, Mul = 0.9f, Shape = Shape.Around, Reach = 2.6f, Knock = 0.25f, Stun = 0.35f },
+                           new Hit { At = 0.95f, Mul = 0.9f, Shape = Shape.Around, Reach = 2.6f, Knock = 0.25f, Stun = 0.35f, MinLevel = 2 },
+                           new Hit { At = 1.05f, Mul = 0.9f, Shape = Shape.Around, Reach = 2.6f, Knock = 0.25f, Stun = 0.35f, MinLevel = 3 },
+                           new Hit { At = 1.15f, Mul = 0.9f, Shape = Shape.Around, Reach = 2.6f, Knock = 0.25f, Stun = 0.35f, MinLevel = 4 },
+                           new Hit { At = 1.25f, Mul = 1.4f, Shape = Shape.Around, Reach = 2.8f, Knock = 1.0f, Stun = 0.45f, MinLevel = 5, Heavy = true } } },
+            // 연속 찌르기 →→ X — 찌르며 들어가 경직을 묶는다 (레벨마다 +1타)
+            new Spec { Name = "연속 찌르기", State = "Skill_Thrust", Speed = 1.25f, End = 1.15f, Cooldown = 6f,
+                       MoveFrom = 0.30f, MoveTo = 0.62f, MoveDist = 1.8f,
+                       Hits = new[] {
+                           new Hit { At = 0.46f, Mul = 0.6f, Reach = 2.8f, Depth = 0.8f, Knock = 0.1f, Stun = 0.3f },
+                           new Hit { At = 0.52f, Mul = 0.6f, Reach = 2.8f, Depth = 0.8f, Knock = 0.1f, Stun = 0.3f },
+                           new Hit { At = 0.58f, Mul = 0.6f, Reach = 2.8f, Depth = 0.8f, Knock = 0.1f, Stun = 0.3f },
+                           new Hit { At = 0.64f, Mul = 0.6f, Reach = 2.8f, Depth = 0.8f, Knock = 0.1f, Stun = 0.3f, MinLevel = 2 },
+                           new Hit { At = 0.70f, Mul = 0.6f, Reach = 2.8f, Depth = 0.8f, Knock = 0.1f, Stun = 0.3f, MinLevel = 3 },
+                           new Hit { At = 0.76f, Mul = 0.6f, Reach = 2.8f, Depth = 0.8f, Knock = 0.1f, Stun = 0.3f, MinLevel = 4 },
+                           new Hit { At = 0.84f, Mul = 1.0f, Reach = 2.8f, Depth = 0.8f, Knock = 1.0f, Stun = 0.4f, MinLevel = 5, Heavy = true } } },
+            // 검기 날리기 ←→ Z — 크게 베며 앞으로 검기를 쏜다 (관통)
+            new Spec { Name = "검기 날리기", State = "Skill_Wave", Kind = Kind.Wave, Speed = 1.2f, End = 0.95f, Cooldown = 7f,
+                       Hits = new[] { new Hit { At = 0.35f, Mul = 2.5f, Reach = 9f, Depth = 0.9f, Knock = 0.7f, Stun = 0.35f } } },
+            // 발도술 ↓→ Z — 웅크렸다 한 번에, 길고 아프게 (보스 딜)
+            new Spec { Name = "발도술", State = "Skill_Iaido", Speed = 1.3f, End = 1.40f, Cooldown = 10f,
+                       MoveFrom = 0.52f, MoveTo = 0.68f, MoveDist = 1.6f,
+                       Hits = new[] { new Hit { At = 0.64f, Mul = 4.5f, Reach = 4.2f, Depth = 0.9f, Knock = 1.4f, Stun = 0.6f, Heavy = true } } },
+            // 반격 자세 ← X — 자세를 잡고 있다가 맞으면 막고 되받아친다
+            new Spec { Name = "반격 자세", State = "Skill_GuardStart", Kind = Kind.Counter, Cooldown = 6f,
+                       Hits = new[] { new Hit { At = 0.38f, Mul = 3.0f, Reach = 2.8f, Depth = 1.3f, Knock = 1.5f, Stun = 0.7f, Heavy = true } } },
+            // 전투 함성 ↑↓ Z — 칼을 하늘로 들며 공격력 버프
+            new Spec { Name = "전투 함성", State = "Skill_WarCry", Kind = Kind.WarCry, Offset = 0.95f, End = 1.65f, Cooldown = 25f },
+            // 질주 ←← X — 잠깐 빨라진다 (모션 없음)
+            new Spec { Name = "질주", Kind = Kind.Sprint, Cooldown = 15f },
+            // 대지 가르기 ↓→↑ Z — 높이 뛰어올라 땅을 내려친다 (궁극기)
+            new Spec { Name = "대지 가르기", State = "Skill_Ultimate", Speed = 1.15f, End = 1.45f, Cooldown = 40f, DamagePerLevel = 0.2f,
+                       MoveFrom = 0.2f, MoveTo = 0.9f, MoveDist = 2.5f,
+                       Hits = new[] { new Hit { At = 0.95f, Mul = 7.0f, Shape = Shape.Around, Reach = 4.5f, Knock = 1.6f, Stun = 1.0f, Lift = 6f, Heavy = true } } },
+        };
+
+        // 버프 수치
+        const float WarCryDamage = 0.25f, WarCryBase = 10f, WarCryPerLevel = 2f;
+        const float SprintSpeed = 1.4f, SprintBase = 3f, SprintPerLevel = 0.5f;
+        const float CounterBase = 0.6f, CounterPerLevel = 0.05f;
+        const float WaveSpeed = 16f, WaveRangePerLevel = 1f;
+
+        // ───────────────────────────── 상태 ─────────────────────────────
+
+        PlayerController _pc;
+        CharacterController _cc;
+        Animator _anim;
+        Health _health;
+        RunManager _run;
+        readonly float[] _cdLeft = new float[SkillBook.All.Length];
+
+        Spec _cur;
+        int _curLevel;
+        float _t;
+        int _nextHit;
+        bool _countered;           // 반격 자세 — 막아서 되받아치는 중
+        float _guardUntil;
+        int _guardPhase;           // 0 시작 · 1 유지 · 2 반격 · 3 끝
+
+        float _buffDamageUntil, _buffSpeedUntil;
+
+        public bool Casting => _cur != null;
+        /// <summary>평타·스킬 피해에 곱한다 (전투 함성).</summary>
+        public float DamageMul => Time.time < _buffDamageUntil ? 1f + WarCryDamage : 1f;
+        /// <summary>이동 속도에 곱한다 (질주).</summary>
+        public float SpeedMul => Time.time < _buffSpeedUntil ? SprintSpeed : 1f;
+
+        // 커맨드 기록 — 절대 방향(L R U D)과 그때 바라보던 쪽
+        struct Token { public char Dir; public float At; public bool FacingRight; }
+        readonly List<Token> _tokens = new();
+        Vector2Int _lastDir;
+
+        void Awake()
+        {
+            _pc = GetComponent<PlayerController>();
+            _cc = GetComponent<CharacterController>();
+            _health = GetComponent<Health>();
+            _anim = GetComponentInChildren<Animator>();
+            foreach (var s in Specs) s.Book = Array.FindIndex(SkillBook.All, d => d.Name == s.Name);
+            _health.Intercept += OnIncoming;
+        }
+
+        void OnDestroy() { if (_health != null) _health.Intercept -= OnIncoming; }
+
+        RunManager Run => _run != null ? _run : (_run = FindFirstObjectByType<RunManager>());
+
+        void Update()
+        {
+            for (int i = 0; i < _cdLeft.Length; i++) if (_cdLeft[i] > 0f) _cdLeft[i] -= Time.deltaTime;
+            RecordDirections();
+            if (_cur != null) Tick();
+        }
+
+        void RecordDirections()
+        {
+            var v = GameInput.MoveValue;
+            Vector2Int d = Vector2Int.zero;
+            if (v.sqrMagnitude > 0.35f)
+                d = Mathf.Abs(v.x) >= Mathf.Abs(v.y) ? new Vector2Int(v.x > 0 ? 1 : -1, 0) : new Vector2Int(0, v.y > 0 ? 1 : -1);
+            if (d != _lastDir && d != Vector2Int.zero)
+            {
+                _tokens.Add(new Token { Dir = d.x > 0 ? 'R' : d.x < 0 ? 'L' : d.y > 0 ? 'U' : 'D', At = Time.unscaledTime, FacingRight = _pc.FacingRight });
+                if (_tokens.Count > 6) _tokens.RemoveAt(0);
+            }
+            _lastDir = d;
+        }
+
+        // ───────────────────────────── 발동 ─────────────────────────────
+
+        /// <summary>
+        /// PlayerController가 매 프레임 먼저 묻는다. 스킬을 냈으면 true — 그 프레임의 평타·이동은 하지 않는다.
+        /// 평타 도중에도 낼 수 있다 (스킬 캔슬).
+        /// </summary>
+        public bool TryCast(Vector2 move)
+        {
+            if (_cur != null) return true;
+            var run = Run;
+            if (run == null || run.Phase != RunPhase.InDungeon) return false;
+
+            // 퀵슬롯 — 커맨드 없이
+            int slot = GameInput.SlotPressed();
+            if (slot >= 0)
+            {
+                int k = run.Skills.Slot(slot);
+                if (k >= 0)
+                {
+                    if (Mathf.Abs(move.x) > 0.3f) _pc.SetFacing(move.x > 0f);
+                    return Begin(SpecOf(k));
+                }
+            }
+
+            bool z = GameInput.SkillPressed, x = GameInput.AttackPressed;
+            if (!z && !x) return false;
+            char button = z ? 'Z' : 'X';
+
+            var spec = Match(button, out bool face);
+            if (spec != null && Begin(spec)) { _pc.SetFacing(face); _tokens.Clear(); return true; }
+            if (z) return Begin(SpecOf(Array.FindIndex(SkillBook.All, d => d.Cmd == "Z")));   // Z 단독 = 내려찍기
+            return false;   // X = 평타
+        }
+
+        /// <summary>커맨드에 맞는 스킬. 긴 커맨드가 이긴다. face = 스킬을 쓸 방향.</summary>
+        Spec Match(char button, out bool face)
+        {
+            face = _pc.FacingRight;
+            float window = Mathf.Max(0.2f, GameSettings.Data.commandWindow);
+            float now = Time.unscaledTime;
+
+            // 끝에서부터 간격이 여유 안인 토큰만 이어 붙인다
+            int start = _tokens.Count;
+            float t = now;
+            for (int i = _tokens.Count - 1; i >= 0; i--)
+            {
+                if (t - _tokens[i].At > window) break;
+                t = _tokens[i].At; start = i;
+            }
+            if (start >= _tokens.Count) return null;
+
+            bool firstFacing = _tokens[start].FacingRight;
+            var s = Best(button, Relative(start, firstFacing));
+            if (s != null) { face = firstFacing; return s; }
+            s = Best(button, Relative(start, _pc.FacingRight));
+            if (s != null) { face = _pc.FacingRight; return s; }
+            return null;
+        }
+
+        string Relative(int start, bool facingRight)
+        {
+            var sb = new System.Text.StringBuilder();
+            for (int i = start; i < _tokens.Count; i++)
+            {
+                char c = _tokens[i].Dir;
+                sb.Append(c == 'U' ? '↑' : c == 'D' ? '↓' : (c == 'R') == facingRight ? '→' : '←');
+            }
+            return sb.ToString();
+        }
+
+        Spec Best(char button, string seq)
+        {
+            Spec best = null; int bestLen = 0;
+            var book = Run.Skills;
+            foreach (var s in Specs)
+            {
+                if (s.Book < 0 || !book.Learned(s.Book)) continue;
+                var cmd = SkillBook.All[s.Book].Cmd.Replace(" ", "");
+                if (cmd.Length < 2 || cmd[cmd.Length - 1] != button) continue;
+                var dirs = cmd.Substring(0, cmd.Length - 1);
+                if (dirs.Length > bestLen && seq.EndsWith(dirs, StringComparison.Ordinal)) { best = s; bestLen = dirs.Length; }
+            }
+            return best;
+        }
+
+        Spec SpecOf(int book)
+        {
+            foreach (var s in Specs) if (s.Book == book) return s;
+            return null;
+        }
+
+        bool Begin(Spec s)
+        {
+            if (s == null || s.Book < 0 || !Run.Skills.Learned(s.Book)) return false;
+            if (_cdLeft[s.Book] > 0f) return false;   // 재사용 중 — X 커맨드면 평타가 대신 나간다
+
+            _curLevel = Run.Skills.Level(s.Book);
+            float cd = Mathf.Max(1f, s.Cooldown + s.CooldownPerLevel * (_curLevel - 1));
+            _cdLeft[s.Book] = cd;
+            int slot = SlotOf(s.Book);
+            if (slot >= 0 && Proto.UI.SkillBarView.Instance != null) Proto.UI.SkillBarView.Instance.Use(slot, cd);
+
+            var feel = Proto.Feel.Feel.I;
+            var head = transform.position + Vector3.up * 2.3f;
+
+            // 모션 없는 버프
+            if (s.Kind == Kind.Sprint)
+            {
+                _buffSpeedUntil = Time.time + SprintBase + SprintPerLevel * (_curLevel - 1);
+                if (feel != null) feel.Popup(head, "질주");
+                return true;
+            }
+
+            _cur = s;
+            _t = s.Offset;
+            _nextHit = 0;
+            _countered = false;
+            _guardPhase = 0;
+            _pc.BeginSkill();
+            Play(s.State, s.Offset);
+            if (feel != null) feel.SwingSfx();
+            return true;
+        }
+
+        int SlotOf(int book)
+        {
+            for (int i = 0; i < SkillBook.SlotCount; i++) if (Run.Skills.Slot(i) == book) return i;
+            return -1;
+        }
+
+        void Play(string state, float offset)
+        {
+            if (_anim == null || string.IsNullOrEmpty(state)) return;
+            _anim.CrossFadeInFixedTime(state, 0.06f, 0, offset);
+        }
+
+        /// <summary>죽거나 조작이 막히면 PlayerController가 부른다.</summary>
+        public void Cancel()
+        {
+            if (_cur == null) return;
+            _cur = null;
+            _pc.EndSkill();
+        }
+
+        void Finish()
+        {
+            _cur = null;
+            if (_anim != null) _anim.CrossFadeInFixedTime("Idle", 0.2f);
+            _pc.EndSkill();
+        }
+
+        // ───────────────────────────── 진행 ─────────────────────────────
+
+        void Tick()
+        {
+            var s = _cur;
+            if (s.Kind == Kind.Counter) { TickCounter(); return; }
+
+            float prev = _t;
+            _t += Time.deltaTime * s.Speed;
+
+            // 이동 — 정해진 구간에 앞으로
+            float dist = s.MoveDist + s.MoveDistPerLevel * (_curLevel - 1);
+            float move = 0f;
+            if (dist > 0f && s.MoveTo > s.MoveFrom)
+            {
+                float a = Mathf.Clamp01(Mathf.InverseLerp(s.MoveFrom, s.MoveTo, prev));
+                float b = Mathf.Clamp01(Mathf.InverseLerp(s.MoveFrom, s.MoveTo, _t));
+                move = dist * (b - a);
+            }
+            _cc.Move(Forward * move + Vector3.down * 2f * Time.deltaTime);
+
+            while (_nextHit < s.Hits.Length && _t >= s.Hits[_nextHit].At)
+            {
+                var h = s.Hits[_nextHit++];
+                if (_curLevel < h.MinLevel) continue;
+                Fire(s, h);
+            }
+
+            if (s.Kind == Kind.WarCry && prev < 1.3f && _t >= 1.3f) WarCry();
+
+            if (_t >= s.End) Finish();
+        }
+
+        Vector3 Forward => _pc.FacingRight ? Vector3.right : Vector3.left;
+
+        void Fire(Spec s, Hit h)
+        {
+            switch (s.Kind)
+            {
+                case Kind.Wave: SpawnWave(s, h); break;
+                default: Strike(s, h); break;
+            }
+        }
+
+        // ── 판정 ──
+
+        /// <summary>판정 하나. 맞힌 수를 돌려준다.</summary>
+        int Strike(Spec s, Hit h, Vector3? origin = null, HashSet<Health> once = null)
+        {
+            var o = origin ?? transform.position;
+            var fwd = Forward;
+            var cfg = _pc.Config;
+            var feel = Proto.Feel.Feel.I;
+
+            // 칼 지나간 자리
+            if (origin == null)
+            {
+                Vector3 swing = o + fwd * 1.0f + Vector3.up * 1.0f;
+                if (h.Shape == Shape.Around)
+                {
+                    Proto.Feel.HitFx.Slash(o + Vector3.right * 1.1f + Vector3.up * 0.9f, true, _nextHit % 2, h.Reach * 1.2f);
+                    Proto.Feel.HitFx.Slash(o + Vector3.left * 1.1f + Vector3.up * 0.9f, false, (_nextHit + 1) % 2, h.Reach * 1.2f);
+                }
+                else Proto.Feel.HitFx.Slash(swing, _pc.FacingRight, h.Heavy ? 2 : _nextHit % 2, h.Heavy ? 4f : 3.2f);
+                if (h.Heavy) Proto.Feel.HitFx.Impact(o + fwd * (h.Shape == Shape.Around ? 0f : 1.4f) + Vector3.up * 0.2f, true);
+            }
+
+            float range = h.Shape == Shape.Around ? h.Reach : h.Reach + 0.5f;
+            var cols = Physics.OverlapSphere(o, range + 1f, _pc.EnemyMask);
+            var struck = new HashSet<Health>();
+            float dmgBase = cfg.attackDamage * h.Mul * (1f + s.DamagePerLevel * (_curLevel - 1)) * DamageMul;
+            int connected = 0; bool killed = false;
+
+            foreach (var c in cols)
+            {
+                var hp = c.GetComponentInParent<Health>();
+                if (hp == null || hp.IsDead || hp.gameObject == gameObject || !struck.Add(hp)) continue;
+                if (once != null && once.Contains(hp)) continue;
+
+                var to = hp.transform.position - o; to.y = 0f;
+                if (h.Shape == Shape.Around) { if (to.magnitude > h.Reach) continue; }
+                else
+                {
+                    float along = Vector3.Dot(to, fwd);
+                    if (along < -0.4f || along > h.Reach || Mathf.Abs(to.z) > h.Depth) continue;
+                }
+                if (once != null) once.Add(hp);   // 검기 — 범위 안에 들어온 뒤에야 '맞은 적'으로 친다
+
+                float dmg = dmgBase;
+                var ec = hp.GetComponent<Proto.Enemy.EnemyController>();
+                if (ec != null) dmg = ec.ModifyIncomingDamage(dmg);
+                var boss = hp.GetComponent<Proto.Enemy.BossController>();
+                if (boss != null) dmg = boss.ModifyIncomingDamage(dmg);
+
+                hp.TakeDamage(dmg, o);
+                connected++;
+                bool kill = hp.IsDead;
+                killed |= kill;
+
+                // 밀기 · 띄우기 — 기본 넉백을 덮어쓴다 (슈퍼아머는 무시)
+                if (ec != null)
+                {
+                    var dir = h.Shape == Shape.Around && to.sqrMagnitude > 0.01f ? to.normalized : fwd;
+                    ec.ApplyHit(dir * (h.Knock / Mathf.Max(0.1f, h.Stun)), h.Stun, h.Lift);
+                }
+
+                if (feel != null)
+                {
+                    var at = hp.transform.position + Vector3.up * 0.9f - fwd * 0.3f;
+                    feel.Spark(at, fwd, kill || h.Heavy);
+                    Proto.Feel.HitFx.Impact(at, kill || h.Heavy);
+                    feel.Number(at + Vector3.up * 0.6f, dmg, kill ? Proto.Feel.Feel.NumberKind.Kill : Proto.Feel.Feel.NumberKind.Normal);
+                }
+            }
+
+            if (feel != null && (connected > 0 || h.Heavy))
+            {
+                if (h.Heavy || killed)
+                {
+                    feel.HitStop(cfg.killHitStopScale);
+                    feel.Shake(fwd, h.Mul >= 5f ? 2.4f : 1.5f);
+                    if (connected > 0) feel.KillSfx();
+                    Proto.Feel.Haptics.Pulse(0.45f, 0.75f, h.Mul >= 5f ? 0.3f : 0.15f);
+                }
+                else
+                {
+                    feel.HitStop(0.7f);
+                    feel.Shake(fwd, 0.6f);
+                    feel.HitSfx();
+                    Proto.Feel.Haptics.Pulse(0.15f, 0.3f, 0.05f);
+                }
+            }
+            return connected;
+        }
+
+        // ── 검기 ──
+
+        void SpawnWave(Spec s, Hit h)
+        {
+            Proto.Feel.HitFx.Slash(transform.position + Forward * 1.0f + Vector3.up * 1.0f, _pc.FacingRight, 2, 3.6f);
+            var go = new GameObject("SwordWave");
+            go.transform.position = transform.position + Vector3.up * 0.1f + Forward * 0.8f;
+            var w = go.AddComponent<SwordWave>();
+            float range = h.Reach + WaveRangePerLevel * (_curLevel - 1);
+            w.Init(this, s, h, Forward, _pc.FacingRight, range / WaveSpeed);
+        }
+
+        /// <summary>검기가 날아가며 부른다 — 한 적은 한 번만.</summary>
+        void WaveStrike(Spec s, Hit h, Vector3 at, HashSet<Health> once) => Strike(s, h, at, once);
+
+        class SwordWave : MonoBehaviour
+        {
+            SkillCaster _owner; Spec _s; Hit _h; Vector3 _dir; bool _right; float _life, _fx;
+            readonly HashSet<Health> _once = new();
+
+            public void Init(SkillCaster owner, Spec s, Hit h, Vector3 dir, bool right, float life)
+            { _owner = owner; _s = s; _h = new Hit { At = h.At, Mul = h.Mul, Reach = 1.2f, Depth = h.Depth, Knock = h.Knock, Stun = h.Stun }; _dir = dir; _right = right; _life = life; }
+
+            void Update()
+            {
+                float dt = Time.deltaTime;
+                transform.position += _dir * WaveSpeed * dt;
+                _life -= dt;
+                _fx -= dt;
+                if (_fx <= 0f) { _fx = 0.045f; Proto.Feel.HitFx.Slash(transform.position + Vector3.up * 0.9f, _right, 2, 2.6f); }
+                if (_owner != null) _owner.WaveStrike(_s, _h, transform.position - _dir * 0.6f, _once);
+                if (_life <= 0f) Destroy(gameObject);
+            }
+        }
+
+        // ── 반격 자세 ──
+
+        void TickCounter()
+        {
+            _t += Time.deltaTime;
+            switch (_guardPhase)
+            {
+                case 0:   // 자세 잡기
+                    if (_t >= 0.3f)
+                    {
+                        _guardPhase = 1; _t = 0f;
+                        _guardUntil = Time.time + CounterBase + CounterPerLevel * (_curLevel - 1);
+                        Play("Skill_GuardLoop", 0f);
+                    }
+                    break;
+                case 1:   // 버티기 — 이 동안 맞으면 OnIncoming이 막고 반격으로 넘긴다
+                    if (_countered) { _guardPhase = 2; _t = 0f; _nextHit = 0; Play("Skill_GuardAtk", 0f); }
+                    else if (Time.time >= _guardUntil) { _guardPhase = 3; _t = 0f; Play("Skill_GuardEnd", 0f); }
+                    break;
+                case 2:   // 반격
+                    if (_nextHit == 0 && _t >= _cur.Hits[0].At) { _nextHit = 1; Strike(_cur, _cur.Hits[0]); }
+                    if (_t >= 1.15f) Finish();
+                    break;
+                case 3:
+                    if (_t >= 0.5f) Finish();
+                    break;
+            }
+        }
+
+        /// <summary>Health가 피해를 받기 직전에 묻는다. true면 막은 것.</summary>
+        bool OnIncoming(float amount, Vector3 src)
+        {
+            if (_cur == null || _cur.Kind != Kind.Counter || _guardPhase != 1) return false;
+            _countered = true;
+            // 때린 쪽을 본다
+            _pc.SetFacing(src.x > transform.position.x);
+            var feel = Proto.Feel.Feel.I;
+            if (feel != null)
+            {
+                feel.Popup(transform.position + Vector3.up * 2.3f, "반격!");
+                feel.HitStop(1.6f);
+                Proto.Feel.HitFx.Impact(transform.position + Forward * 0.6f + Vector3.up * 1.1f, true);
+            }
+            Proto.Feel.Haptics.Pulse(0.3f, 0.8f, 0.12f);
+            return true;
+        }
+
+        // ── 버프 ──
+
+        void WarCry()
+        {
+            _buffDamageUntil = Time.time + WarCryBase + WarCryPerLevel * (_curLevel - 1);
+            var feel = Proto.Feel.Feel.I;
+            if (feel != null)
+            {
+                feel.Popup(transform.position + Vector3.up * 2.5f, "공격력 +" + Mathf.RoundToInt(WarCryDamage * 100f) + "%");
+                feel.Shake(Vector3.up, 1.2f);
+            }
+            Proto.Feel.HitFx.Impact(transform.position + Vector3.up * 1.6f, true);
+            Proto.Feel.Haptics.Pulse(0.4f, 0.4f, 0.25f);
+        }
+    }
+}

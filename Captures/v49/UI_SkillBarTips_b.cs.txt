@@ -1,0 +1,183 @@
+using UnityEngine;
+using UnityEngine.UI;
+using UnityEngine.InputSystem;
+using TMPro;
+using Proto.Core;
+
+namespace Proto.UI
+{
+    /// <summary>
+    /// 스킬창(퀵슬롯) 설명.
+    ///
+    ///   마우스   칸 위에 올리면 그 칸 위에 설명 창 — 이름 · 레벨 · 역할 · 커맨드 · 재사용 · 레벨업 · 마스터
+    ///   패드     칸 버튼 조합키(R1 / RB)를 0.35초 넘게 누르고 있으면 네 칸 위에 짧은 카드가 펼쳐진다
+    ///            (이름 · 레벨 · 재사용 · 역할). 얼굴 버튼을 바로 누르면 — 평소처럼 스킬만 나가고 카드는 안 뜬다.
+    ///            자세한 설명은 스킬 창에서 본다.
+    ///
+    /// SkillBarView가 만든 "SkillBar/Slot0~3"를 찾아 붙는다. 씬에 따로 둘 필요 없다.
+    /// </summary>
+    public class SkillBarTips : MonoBehaviour
+    {
+        const float TipW = 400f, CardW = 150f;
+        const float PeekDelay = 0.35f;
+
+        RunManager _run;
+        Proto.Player.SkillCaster _caster;
+        RectTransform[] _slots;
+        RectTransform _tip;
+        TextMeshProUGUI _tipText;
+        RectTransform[] _cards;
+        TextMeshProUGUI[] _cardText;
+        int _hover = -1;
+        float _chordT;
+        bool _peek;
+
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
+        static void Boot()
+        {
+            // SkillBarView와 같은 곳(DungeonHud)에 붙는다 — 칸은 Start에서 찾는다 (그때면 SkillBarView가 다 만들어 둔다)
+            var hud = FindFirstObjectByType<HudView>(FindObjectsInactive.Include);
+            var root = hud != null ? hud.transform.Find("DungeonHud") : null;
+            if (root == null || root.GetComponent<SkillBarTips>() != null) return;
+            root.gameObject.AddComponent<SkillBarTips>();
+        }
+
+        void Start()
+        {
+            _run = FindFirstObjectByType<RunManager>();
+            _caster = FindFirstObjectByType<Proto.Player.SkillCaster>();
+            var bar = transform.Find("SkillBar");
+            if (bar == null) { enabled = false; return; }
+            _slots = new RectTransform[SkillBook.SlotCount];
+            for (int i = 0; i < _slots.Length; i++) _slots[i] = bar.Find("Slot" + i) as RectTransform;
+
+            // 설명 창 (마우스)
+            _tip = Panel(transform, "SkillTip", out _tipText, 19f, 18f);
+            _tip.gameObject.SetActive(false);
+
+            // 짧은 카드 (패드)
+            _cards = new RectTransform[_slots.Length];
+            _cardText = new TextMeshProUGUI[_slots.Length];
+            for (int i = 0; i < _slots.Length; i++)
+            {
+                _cards[i] = Panel(transform, "SkillCard" + i, out _cardText[i], 16f, 10f);
+                _cards[i].gameObject.SetActive(false);
+            }
+        }
+
+        static RectTransform Panel(Transform parent, string name, out TextMeshProUGUI text, float size, float pad)
+        {
+            var bg = UiKit.Image(parent, name, UiKit.GlassFill, UiArt.RoundRectFill);
+            bg.type = Image.Type.Sliced;
+            var rt = bg.rectTransform;
+            rt.anchorMin = rt.anchorMax = Vector2.zero;
+            rt.pivot = new Vector2(0.5f, 0f);
+            var ol = UiKit.Image(rt, "Outline", new Color(0.86f, 0.64f, 0.30f, 0.85f), UiArt.RoundRectOutline);
+            ol.type = Image.Type.Sliced;
+            UiKit.Stretch(ol.rectTransform);
+            text = UiKit.Text(rt, "Text", "", size, TextAlignmentOptions.TopLeft);
+            UiKit.Stretch(text.rectTransform);
+            text.rectTransform.offsetMin = new Vector2(pad, pad * 0.8f);
+            text.rectTransform.offsetMax = new Vector2(-pad, -pad * 0.8f);
+            text.textWrappingMode = TextWrappingModes.Normal;
+            text.richText = true;
+            return rt;
+        }
+
+        void Update()
+        {
+            if (_slots == null || _run == null) return;
+            bool pad = GameInput.Scheme != InputScheme.Keyboard;
+
+            // ── 마우스 — 칸 위에 올리면 ──
+            int hover = -1;
+            if (!pad && Mouse.current != null)
+            {
+                var mp = Mouse.current.position.ReadValue();
+                for (int i = 0; i < _slots.Length; i++)
+                    if (_slots[i] != null && _run.Skills.Slot(i) >= 0 && RectTransformUtility.RectangleContainsScreenPoint(_slots[i], mp, null))
+                        hover = i;
+            }
+            if (hover != _hover)
+            {
+                _hover = hover;
+                if (hover >= 0) ShowTip(hover);
+                else _tip.gameObject.SetActive(false);
+            }
+
+            // ── 패드 — 조합키를 누르고 있으면 ──
+            bool held = pad && GameInput.ChordHeld && _run.Phase == RunPhase.InDungeon;
+            if (held && GameInput.SlotPressed() >= 0) _chordT = -99f;   // 바로 눌렀다 — 이번엔 안 띄운다
+            _chordT = held ? _chordT + Time.unscaledDeltaTime : 0f;
+            bool peek = _chordT >= PeekDelay;
+            if (peek != _peek || peek) SetPeek(peek);
+        }
+
+        // ───────────────────────────── 마우스 설명 ─────────────────────────────
+
+        void ShowTip(int slot)
+        {
+            int k = _run.Skills.Slot(slot);
+            if (k < 0) { _tip.gameObject.SetActive(false); return; }
+            var d = SkillBook.All[k];
+            int lv = Mathf.Max(1, _run.Skills.Level(k));
+            float cd = _caster != null ? _caster.CooldownOf(k) : 0f;
+
+            var sb = new System.Text.StringBuilder();
+            sb.Append($"<size=125%><b>{d.Name}</b></size>   <color=#ffd45a>Lv {lv}</color><color=#8a8698> / {d.MaxLevel}</color>\n");
+            sb.Append($"<color=#a8a4b8>{d.Role}</color>\n\n");
+            sb.Append($"커맨드  {InputGlyphs.Command(d.Cmd)}");
+            if (cd > 0f) sb.Append($"     재사용  <color=#cfd8ff>{cd:0.#}초</color>");
+            sb.Append("\n\n");
+            sb.Append($"<color=#9be27a>레벨업</color>  {d.PerLevel}\n");
+            sb.Append(lv >= d.MaxLevel ? $"<color=#ffcc6b>마스터</color>  {d.Mastery}" : $"<color=#8a8698>마스터 (Lv {d.MaxLevel})  {d.Mastery}</color>");
+
+            _tipText.text = sb.ToString();
+            _tip.gameObject.SetActive(true);
+            float h = _tipText.GetPreferredValues(_tipText.text, TipW - 36f, 0f).y + 18f * 1.6f + 4f;
+            _tip.sizeDelta = new Vector2(TipW, h);
+            Place(_tip, _slots[slot], TipW);
+            _tip.SetAsLastSibling();
+        }
+
+        // ───────────────────────────── 패드 카드 ─────────────────────────────
+
+        void SetPeek(bool on)
+        {
+            bool changed = on != _peek;
+            _peek = on;
+            for (int i = 0; i < _cards.Length; i++)
+            {
+                int k = on ? _run.Skills.Slot(i) : -1;
+                bool show = k >= 0;
+                if (_cards[i].gameObject.activeSelf != show) _cards[i].gameObject.SetActive(show);
+                if (!show || !changed) continue;
+                var d = SkillBook.All[k];
+                int lv = Mathf.Max(1, _run.Skills.Level(k));
+                float cd = _caster != null ? _caster.CooldownOf(k) : 0f;
+                _cardText[i].text = $"<b>{d.Name}</b>\n<size=88%><color=#ffd45a>Lv {lv}</color>" +
+                                    (cd > 0f ? $"  <color=#cfd8ff>{cd:0.#}초</color>" : "") +
+                                    $"\n<color=#a8a4b8>{d.Role}</color></size>";
+                float h = _cardText[i].GetPreferredValues(_cardText[i].text, CardW - 20f, 0f).y + 16f + 4f;
+                _cards[i].sizeDelta = new Vector2(CardW, h);
+                Place(_cards[i], _slots[i], CardW);
+                _cards[i].SetAsLastSibling();
+            }
+        }
+
+        /// <summary>칸 바로 위 가운데에 놓는다. 화면 왼쪽 끝을 넘지 않게.</summary>
+        void Place(RectTransform panel, RectTransform slot, float w)
+        {
+            var parent = (RectTransform)panel.parent;
+            var corners = new Vector3[4];
+            slot.GetWorldCorners(corners);
+            Vector2 top = (corners[1] + corners[2]) * 0.5f;
+            RectTransformUtility.ScreenPointToLocalPointInRectangle(parent, top, null, out var local);
+            // 부모 왼쪽 아래 기준으로 바꾼다
+            var pr = parent.rect;
+            var pos = local - new Vector2(pr.xMin, pr.yMin) + new Vector2(0f, 14f);
+            pos.x = Mathf.Max(pos.x, w * 0.5f + 12f);
+            panel.anchoredPosition = pos;
+        }
+    }
+}

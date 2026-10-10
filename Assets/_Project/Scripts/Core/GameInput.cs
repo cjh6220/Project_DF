@@ -15,10 +15,12 @@ namespace Proto.Core
     ///   이동        방향키          왼쪽 스틱 · 십자키
     ///   기본 공격   X               □ / X
     ///   스킬        Z               △ / Y      — 커맨드는 방향 + Z 또는 방향 + X
-    ///   채굴        C (누르고 있기)  × / A
     ///   대화·확인   Space · C       × / A
     ///   닫기·취소   Esc             ○ / B
     ///   메뉴        Esc             OPTIONS / Menu
+    ///   탭 넘기기   Q · E           L1 · R1 / LB · RB   (창 안에서만)
+    ///   보조 버튼   R · Tab         R3 · 공유 / R3 · View (창 안에서만 — 예: 성장 트리 [코어로] · [전체 보기])
+    ///   장비 창     I               공유 / View   (마을 · 던전 어디서나)
     ///   퀵슬롯 1~4  A S D F         R1 / RB 누른 채 □ △ ○ ×
     ///   트리 이동   (드래그)        오른쪽 스틱,  확대·축소 L2/R2
     ///
@@ -30,7 +32,6 @@ namespace Proto.Core
         public static InputAction Move { get; private set; }
         public static InputAction Attack { get; private set; }
         public static InputAction Skill { get; private set; }
-        public static InputAction Mine { get; private set; }
         public static InputAction Interact { get; private set; }
         public static InputAction Cancel { get; private set; }
         public static InputAction Menu { get; private set; }
@@ -38,6 +39,14 @@ namespace Proto.Core
         public static InputAction ZoomIn { get; private set; }
         public static InputAction ZoomOut { get; private set; }
         public static InputAction SlotChord { get; private set; }
+        /// <summary>창 안의 탭 넘기기 — Q / E, 패드 L1 · R1 (LB · RB).</summary>
+        public static InputAction PagePrev { get; private set; }
+        public static InputAction PageNext { get; private set; }
+        /// <summary>창의 보조 버튼 둘 — R / 오른쪽 스틱 누르기, Tab / 공유(View).</summary>
+        public static InputAction AltA { get; private set; }
+        public static InputAction AltB { get; private set; }
+        /// <summary>장비 창 열기/닫기 — I, 패드 공유(View).</summary>
+        public static InputAction Inventory { get; private set; }
         static InputAction[] _slotKeys, _slotFace;
 
         public static InputScheme Scheme { get; private set; } = InputScheme.Keyboard;
@@ -61,11 +70,15 @@ namespace Proto.Core
 
             Attack = Button("Attack", "<Keyboard>/x", "<Gamepad>/buttonWest");
             Skill = Button("Skill", "<Keyboard>/z", "<Gamepad>/buttonNorth");
-            Mine = Button("Mine", "<Keyboard>/c", "<Gamepad>/buttonSouth");
-            Interact = Button("Interact", "<Keyboard>/space", "<Keyboard>/c", "<Keyboard>/enter", "<Gamepad>/buttonSouth");
+            Interact = Button("Interact", "<Keyboard>/space", "<Keyboard>/c", "<Keyboard>/enter", "<Gamepad>/buttonSouth", "<Keyboard>/numpadEnter");
             Cancel = Button("Cancel", "<Keyboard>/escape", "<Gamepad>/buttonEast");
             Menu = Button("Menu", "<Keyboard>/escape", "<Gamepad>/start");
             SlotChord = Button("SlotChord", "<Gamepad>/rightShoulder");
+            PagePrev = Button("PagePrev", "<Keyboard>/q", "<Gamepad>/leftShoulder");
+            PageNext = Button("PageNext", "<Keyboard>/e", "<Gamepad>/rightShoulder");
+            AltA = Button("AltA", "<Keyboard>/r", "<Gamepad>/rightStickPress");
+            AltB = Button("AltB", "<Keyboard>/tab", "<Gamepad>/select");
+            Inventory = Button("Inventory", "<Keyboard>/i", "<Gamepad>/select");
 
             Pan = new InputAction("Pan", InputActionType.Value);
             Pan.AddBinding("<Gamepad>/rightStick");
@@ -98,9 +111,10 @@ namespace Proto.Core
 
         static System.Collections.Generic.IEnumerable<InputAction> All()
         {
-            yield return Move; yield return Attack; yield return Skill; yield return Mine;
+            yield return Move; yield return Attack; yield return Skill;
             yield return Interact; yield return Cancel; yield return Menu; yield return SlotChord;
             yield return Pan; yield return ZoomIn; yield return ZoomOut;
+            yield return PagePrev; yield return PageNext; yield return AltA; yield return AltB; yield return Inventory;
             foreach (var a in _slotKeys) yield return a;
             foreach (var a in _slotFace) yield return a;
         }
@@ -112,11 +126,14 @@ namespace Proto.Core
 
         public static bool AttackPressed { get { Ensure(); return Attack.WasPressedThisFrame() && !ChordHeld; } }
         public static bool SkillPressed { get { Ensure(); return Skill.WasPressedThisFrame() && !ChordHeld; } }
-        public static bool MinePressed { get { Ensure(); return Mine.WasPressedThisFrame() && !ChordHeld; } }
-        public static bool MineHeld { get { Ensure(); return Mine.IsPressed(); } }
         public static bool InteractPressed { get { Ensure(); return Interact.WasPressedThisFrame() && !ChordHeld; } }
         public static bool CancelPressed { get { Ensure(); return Cancel.WasPressedThisFrame() && !ChordHeld; } }
         public static bool MenuPressed { get { Ensure(); return Menu.WasPressedThisFrame(); } }
+        /// <summary>탭 넘기기: -1 (Q · L1) · +1 (E · R1) · 0. 창 안에서만 쓴다 (R1은 던전에선 퀵슬롯 조합키).</summary>
+        public static int PageStep { get { Ensure(); return (PageNext.WasPressedThisFrame() ? 1 : 0) - (PagePrev.WasPressedThisFrame() ? 1 : 0); } }
+        public static bool AltAPressed { get { Ensure(); return AltA.WasPressedThisFrame(); } }
+        public static bool AltBPressed { get { Ensure(); return AltB.WasPressedThisFrame(); } }
+        public static bool InventoryPressed { get { Ensure(); return Inventory.WasPressedThisFrame(); } }
         public static Vector2 MoveValue { get { Ensure(); return Move.ReadValue<Vector2>(); } }
 
         /// <summary>이번 프레임에 눌린 퀵슬롯 번호 (0~3). 없으면 -1.</summary>
@@ -215,7 +232,6 @@ namespace Proto.Core
                 new Rebindable { Label = "오른쪽",    Action = Move, Index = 4 },
                 new Rebindable { Label = "공격",      Action = Attack, Index = 0 },
                 new Rebindable { Label = "스킬",      Action = Skill, Index = 0 },
-                new Rebindable { Label = "채굴",      Action = Mine, Index = 0 },
                 new Rebindable { Label = "대화 · 결정", Action = Interact, Index = 0 },
                 new Rebindable { Label = "퀵슬롯 1",  Action = _slotKeys[0], Index = 0 },
                 new Rebindable { Label = "퀵슬롯 2",  Action = _slotKeys[1], Index = 0 },

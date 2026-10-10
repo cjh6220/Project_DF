@@ -1,0 +1,533 @@
+using System.Collections.Generic;
+using UnityEngine;
+using UnityEngine.UI;
+using UnityEngine.InputSystem;
+using TMPro;
+using Proto.Core;
+
+namespace Proto.UI
+{
+    /// <summary>
+    /// 장비 창 — I(패드 공유 · View)로 마을과 던전 어디서나 연다. 던전에서는 여는 동안 시간이 멈춘다.
+    ///
+    ///   왼쪽   장착 칸 7개 (투구 · 갑옷 · 장갑 · 신발 / 무기 · 귀걸이 · 목걸이) + 장비 능력치 합계
+    ///   가운데 가방 (8칸씩) — 새로 주운 장비에는 NEW
+    ///   오른쪽 고른 장비 설명 + 지금 낀 것과 비교 (▲ ▼)
+    ///
+    /// 조작 — 방향키로 칸 이동 (가방 왼쪽 끝에서 ← 하면 장착 칸으로), 확인 = 장착 / 해제,
+    ///        R(R3) = 정렬 바꾸기, Esc · I = 닫기. 마우스는 클릭 = 고르기, 고른 칸을 한 번 더 클릭 = 장착 / 해제.
+    /// 상태는 RunManager.Inventory에 있다. 이 창은 보여 주고 요청만 한다.
+    /// </summary>
+    public class InventoryView : MonoBehaviour
+    {
+        public static InventoryView Instance { get; private set; }
+        public static bool IsOpen { get; private set; }
+        /// <summary>닫힌 프레임 — 같은 Esc로 포기 창 · 메뉴가 열리지 않게.</summary>
+        public static int ClosedFrame { get; private set; } = -10;
+
+        const float W = 1400f, H = 880f;
+        const float Cell = 80f, Gap = 8f;
+        const int Cols = 8, VisibleRows = 7;
+        const float SlotSize = 104f;
+
+        RunManager _run;
+        Proto.Player.PlayerController _player;
+        RectTransform _root, _panel, _win, _content;
+        TextMeshProUGUI _bagLabel, _sortLabel, _detail, _compare, _stats, _hint, _actLabel, _money;
+        Button _act;
+        readonly ItemCell[] _slots = new ItemCell[7];
+        readonly List<ItemCell> _cells = new();
+        readonly List<Item> _view = new();
+
+        // 바깥 안내 (창이 닫혀 있을 때 오른쪽 아래)
+        RectTransform _tag;
+        TextMeshProUGUI _tagText;
+
+        int _zone = 1;        // 0 장착 칸 · 1 가방
+        int _slotSel;         // 장착 칸 (EquipSlot 순서)
+        int _bagSel;          // 가방 (_view 순서)
+        int _scroll;          // 가방 맨 위 줄
+        int _sort;            // 0 최신 · 1 등급 · 2 부위
+        float _openedAt;
+        bool _hadControl;
+        bool _paused;
+        static readonly string[] SortNames = { "최신순", "등급순", "부위순" };
+
+        // 장착 칸 배치 — (열, 줄) → 부위
+        static readonly EquipSlot[][] Layout =
+        {
+            new[] { EquipSlot.Helmet, EquipSlot.Armor, EquipSlot.Gloves, EquipSlot.Boots },
+            new[] { EquipSlot.Weapon, EquipSlot.Earring, EquipSlot.Necklace },
+        };
+
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
+        static void Boot()
+        {
+            if (Instance != null) return;
+            var host = WinKit.Host();
+            if (host == null) return;
+            var go = new GameObject("InventoryView", typeof(RectTransform));
+            go.transform.SetParent(host, false);
+            UiKit.Stretch((RectTransform)go.transform);
+            go.AddComponent<InventoryView>();
+        }
+
+        void Awake()
+        {
+            Instance = this;
+            IsOpen = false;
+            _run = FindFirstObjectByType<RunManager>();
+            _player = FindFirstObjectByType<Proto.Player.PlayerController>();
+            Build();
+            BuildTag();
+            _root.gameObject.SetActive(false);
+        }
+
+        void OnDestroy()
+        {
+            if (Instance == this) { Instance = null; IsOpen = false; }
+        }
+
+        void Start()
+        {
+            if (_run != null)
+            {
+                _run.Inventory.Changed += () => { if (IsOpen) Refresh(); RefreshTag(); };
+                _run.StatsChanged += () => { if (IsOpen) RefreshStats(); };
+            }
+            RefreshTag();
+        }
+
+        void OnEnable() => GameInput.SchemeChanged += OnScheme;
+        void OnDisable() => GameInput.SchemeChanged -= OnScheme;
+        void OnScheme() { RefreshTag(); if (IsOpen) RefreshHint(); }
+
+        // ───────────────────────────── 열기 · 닫기 ─────────────────────────────
+
+        bool CanOpen()
+        {
+            if (_run == null) return false;
+            if (_run.Phase != RunPhase.Village && _run.Phase != RunPhase.InDungeon) return false;
+            if (UiFocus.Blocked || UiFocus.ClosedRecently) return false;
+            if (SystemMenu.IsOpen || GiveUpMenu.IsOpen || SettingsView.IsOpen) return false;
+            if (_run.Phase == RunPhase.InDungeon && Time.timeScale <= 0f) return false;
+            if (_player != null && !_player.ControlEnabled) return false;   // 대화 중 · 문 들어가는 중 · 쓰러짐
+            return true;
+        }
+
+        public void Open()
+        {
+            if (IsOpen || !CanOpen()) return;
+            IsOpen = true;
+            _openedAt = Time.unscaledTime;
+            UiFocus.Block(this, () => this != null && IsOpen);
+            _root.gameObject.SetActive(true);
+            transform.SetAsLastSibling();
+            if (_player != null) { _hadControl = _player.ControlEnabled; _player.ControlEnabled = false; }
+            _paused = _run.Phase == RunPhase.InDungeon;
+            if (_paused) Time.timeScale = 0f;   // 던전 — 고르는 동안 피로도 · 몬스터가 멈춘다
+            _zone = _run.Inventory.Count > 0 ? 1 : 0;
+            _bagSel = 0; _scroll = 0;
+            Refresh();
+            StartCoroutine(WinKit.PopIn(_win));
+            RefreshTag();
+        }
+
+        public void Close()
+        {
+            if (!IsOpen) return;
+            IsOpen = false;
+            ClosedFrame = Time.frameCount;
+            _root.gameObject.SetActive(false);
+            UiFocus.Unblock(this);
+            if (_paused) { Time.timeScale = 1f; _paused = false; }
+            if (_player != null && _hadControl && _run != null && (_run.Phase == RunPhase.Village || _run.Phase == RunPhase.InDungeon))
+                _player.ControlEnabled = true;
+            _run.Inventory.MarkSeen();   // 한 번 열어 본 장비는 NEW가 꺼진다
+            RefreshTag();
+        }
+
+        void Update()
+        {
+            if (!IsOpen)
+            {
+                if (GameInput.InventoryPressed && CanOpen()) Open();
+                UpdateTag();
+                return;
+            }
+
+            // 던전이 끝나는 등 다른 길로 상황이 바뀌면 닫는다
+            if (_run.Phase != RunPhase.Village && _run.Phase != RunPhase.InDungeon) { Close(); return; }
+            if (GameInput.CancelPressed || (GameInput.InventoryPressed && Time.unscaledTime - _openedAt > 0.1f)) { Close(); return; }
+            if (Time.unscaledTime - _openedAt < 0.15f) return;   // 연 키가 바로 '장착'으로 새지 않게
+
+            var d = GameInput.Navigate();
+            if (d != Vector2Int.zero) Move(d);
+            if (GameInput.InteractPressed) DoAction();
+            if (GameInput.AltAPressed) { _sort = (_sort + 1) % SortNames.Length; Refresh(); }
+
+            // 휠로 가방 넘기기
+            var m = Mouse.current;
+            if (m != null)
+            {
+                float wheel = m.scroll.ReadValue().y;
+                if (Mathf.Abs(wheel) > 0.01f) { _scroll = Mathf.Clamp(_scroll - (int)Mathf.Sign(wheel), 0, MaxScroll()); LayoutCells(); }
+            }
+
+            float pulse = 0.65f + 0.35f * Mathf.Sin(Time.unscaledTime * 5f);
+            for (int i = 0; i < _slots.Length; i++) _slots[i].SetFocus(_zone == 0 && _slotSel == i, pulse);
+            for (int i = 0; i < _cells.Count; i++) _cells[i].SetFocus(_zone == 1 && _bagSel == i && i < _view.Count, pulse);
+        }
+
+        // ───────────────────────────── 조작 ─────────────────────────────
+
+        void Move(Vector2Int d)
+        {
+            if (_zone == 0)
+            {
+                FindInLayout((EquipSlot)_slotSel, out int col, out int row);
+                if (d.y != 0) row = Mathf.Clamp(row - d.y, 0, Layout[col].Length - 1);
+                else if (d.x < 0 && col == 1) { col = 0; row = Mathf.Min(row, Layout[0].Length - 1); }
+                else if (d.x > 0 && col == 0) { col = 1; row = Mathf.Min(row, Layout[1].Length - 1); }
+                else if (d.x > 0 && col == 1 && _view.Count > 0)
+                {
+                    // 가방으로 — 보이는 줄의 맨 왼쪽
+                    _zone = 1;
+                    _bagSel = Mathf.Min(_view.Count - 1, (_scroll + Mathf.Min(row * 2, VisibleRows - 1)) * Cols);
+                    Paint();
+                    return;
+                }
+                _slotSel = (int)Layout[col][row];
+            }
+            else
+            {
+                if (_view.Count == 0) { _zone = 0; Paint(); return; }
+                int col = _bagSel % Cols, row = _bagSel / Cols;
+                int rows = (_view.Count + Cols - 1) / Cols;
+                if (d.x < 0 && col == 0)
+                {
+                    // 장착 칸으로 — 오른쪽 열
+                    _zone = 0;
+                    int r = Mathf.Clamp((row - _scroll) / 2, 0, Layout[1].Length - 1);
+                    _slotSel = (int)Layout[1][r];
+                    Paint();
+                    return;
+                }
+                if (d.x != 0) col = Mathf.Clamp(col + d.x, 0, Cols - 1);
+                if (d.y != 0) row = Mathf.Clamp(row - d.y, 0, rows - 1);
+                _bagSel = Mathf.Min(_view.Count - 1, row * Cols + col);
+                EnsureVisible();
+            }
+            Paint();
+        }
+
+        static void FindInLayout(EquipSlot s, out int col, out int row)
+        {
+            for (col = 0; col < Layout.Length; col++)
+                for (row = 0; row < Layout[col].Length; row++)
+                    if (Layout[col][row] == s) return;
+            col = 1; row = 0;
+        }
+
+        void DoAction()
+        {
+            var inv = _run.Inventory;
+            if (_zone == 0)
+            {
+                var it = inv.Equipped((EquipSlot)_slotSel);
+                if (it == null) return;
+                if (!inv.Unequip((EquipSlot)_slotSel)) { Flash("가방이 가득 찼습니다"); return; }
+            }
+            else
+            {
+                var it = Selected;
+                if (it == null) return;
+                inv.Equip(it);
+                // 장착하면 그 칸을 보여 준다 — 무엇이 바뀌었는지 눈으로 따라가게
+                _slotSel = (int)it.slot;
+                StartCoroutine(Pop(_slots[_slotSel].Root));
+            }
+        }
+
+        Item Selected => _zone == 1 ? (_bagSel >= 0 && _bagSel < _view.Count ? _view[_bagSel] : null)
+                                    : _run.Inventory.Equipped((EquipSlot)_slotSel);
+
+        void OnClickSlot(int i)
+        {
+            if (_zone == 0 && _slotSel == i) { DoAction(); return; }
+            _zone = 0; _slotSel = i; Paint();
+        }
+
+        void OnClickCell(int i)
+        {
+            if (i >= _view.Count) return;
+            if (_zone == 1 && _bagSel == i) { DoAction(); return; }
+            _zone = 1; _bagSel = i; Paint();
+        }
+
+        int MaxScroll()
+        {
+            int rows = (_view.Count + Cols - 1) / Cols;
+            int cap = (_run.Inventory.Capacity + Cols - 1) / Cols;
+            return Mathf.Max(0, Mathf.Max(rows, cap) - VisibleRows);
+        }
+
+        void EnsureVisible()
+        {
+            int row = _bagSel / Cols;
+            if (row < _scroll) _scroll = row;
+            if (row >= _scroll + VisibleRows) _scroll = row - VisibleRows + 1;
+            _scroll = Mathf.Clamp(_scroll, 0, MaxScroll());
+            LayoutCells();
+        }
+
+        // ───────────────────────────── 그리기 ─────────────────────────────
+
+        void Refresh()
+        {
+            var inv = _run.Inventory;
+            _view.Clear();
+            _view.AddRange(inv.Bag);
+            switch (_sort)
+            {
+                case 0: _view.Sort((a, b) => b.seq.CompareTo(a.seq)); break;
+                case 1: _view.Sort((a, b) => a.rarity != b.rarity ? b.rarity.CompareTo(a.rarity) : a.tier != b.tier ? b.tier.CompareTo(a.tier) : a.slot.CompareTo(b.slot)); break;
+                default: _view.Sort((a, b) => a.slot != b.slot ? a.slot.CompareTo(b.slot) : b.rarity.CompareTo(a.rarity)); break;
+            }
+
+            // 지금 열린 칸만 그린다 (아직 못 늘린 칸은 숨김)
+            int need = CellCount();
+            while (_cells.Count < need)
+            {
+                int idx = _cells.Count;
+                var c = ItemCell.Create(_content, "Cell" + idx, Vector2.zero, Cell);
+                c.Button.onClick.AddListener(() => OnClickCell(idx));
+                _cells.Add(c);
+            }
+            for (int i = 0; i < _cells.Count; i++)
+            {
+                _cells[i].Root.gameObject.SetActive(i < need);
+                _cells[i].Set(i < _view.Count ? _view[i] : null, "");
+                _cells[i].Bg.color = new Color(0.08f, 0.09f, 0.13f, 0.95f);
+            }
+            for (int i = 0; i < _slots.Length; i++) _slots[i].Set(inv.Equipped((EquipSlot)i), ItemDb.SlotName((EquipSlot)i));
+
+            if (_view.Count == 0 && _zone == 1) _zone = 0;
+            _bagSel = Mathf.Clamp(_bagSel, 0, Mathf.Max(0, _view.Count - 1));
+            _bagLabel.text = $"가방  <color=#{(inv.Full ? "ff7a6a" : "ffd45a")}>{inv.Count}</color> / {inv.Capacity}";
+            _sortLabel.text = $"{InputGlyphs.Of(Act.AltA)} {SortNames[_sort]}";
+            _money.text = $"{UiKit.Icon(ResourceId.Dust)} {_run.Bank.Get(ResourceId.Dust) + (_run.Phase == RunPhase.InDungeon ? _run.RunLoot.Get(ResourceId.Dust) : 0)}    {UiKit.Icon(ResourceId.Gold)} {_run.Bank.Get(ResourceId.Gold)}";
+            EnsureVisible();
+            RefreshStats();
+            RefreshHint();
+            Paint();
+        }
+
+        int CellCount() { return Mathf.Max(_run.Inventory.Capacity, _view.Count); }
+
+        void LayoutCells()
+        {
+            int need = CellCount();
+            for (int i = 0; i < _cells.Count; i++)
+            {
+                int col = i % Cols, row = i / Cols - _scroll;
+                var rt = _cells[i].Root;
+                rt.anchoredPosition = new Vector2(col * (Cell + Gap), -row * (Cell + Gap));
+                bool visible = i < need && row >= 0 && row < VisibleRows;
+                if (rt.gameObject.activeSelf != visible) rt.gameObject.SetActive(visible);
+            }
+        }
+
+        void Paint()
+        {
+            var it = Selected;
+            if (it == null)
+            {
+                _detail.text = _zone == 0
+                    ? $"<size=120%><b>{ItemDb.SlotName((EquipSlot)_slotSel)}</b></size>\n<color=#7d7a8c>비어 있음</color>"
+                    : "<color=#7d7a8c>가방이 비어 있습니다\n\n몬스터를 잡거나 보물방 상자를 열어\n장비를 얻으세요</color>";
+                _compare.text = "";
+                _act.gameObject.SetActive(false);
+                return;
+            }
+            _detail.text = ItemUi.Describe(it);
+            var cur = _run.Inventory.Equipped(it.slot);
+            _compare.text = _zone == 1 ? "<b>지금 장착한 것과 비교</b>\n" + ItemUi.Compare(it, cur) : "<color=#a8a4b8>장착 중</color>";
+            _act.gameObject.SetActive(true);
+            _actLabel.text = (_zone == 0 ? "해제" : "장착") + $"  <size=80%>{InputGlyphs.Of(Act.Interact)}</size>";
+        }
+
+        void RefreshStats()
+        {
+            if (_stats == null || _run == null) return;
+            var inv = _run.Inventory;
+            var live = _run.Config;
+            var sb = new System.Text.StringBuilder();
+            sb.Append($"<color=#ffd45a>공격력 {Mathf.RoundToInt(live.attackDamage)}</color>    <color=#ff9a8a>체력 {Mathf.RoundToInt(live.maxHealth)}</color>\n");
+            sb.Append("<size=85%><color=#a8a4b8>장비 합계</color></size>\n");
+            int n = 0;
+            foreach (StatId s in System.Enum.GetValues(typeof(StatId)))
+            {
+                float v = inv.Total(s);
+                if (v <= 0f) continue;
+                sb.Append($"<size=88%>{ItemDb.StatName(s)} <color=#cfd8ff>{ItemDb.Format(s, v)}</color></size>");
+                sb.Append(n % 2 == 0 ? "    " : "\n");
+                n++;
+            }
+            if (n == 0) sb.Append("<size=88%><color=#7d7a8c>장비를 끼면 여기에 더해진다</color></size>");
+            _stats.text = sb.ToString();
+        }
+
+        void RefreshHint()
+        {
+            if (_hint == null) return;
+            _hint.text = $"{InputGlyphs.Of(Act.Navigate)} 이동   ·   {InputGlyphs.Of(Act.Interact)} 장착 / 해제   ·   {InputGlyphs.Of(Act.AltA)} 정렬   ·   {InputGlyphs.Of(Act.Cancel)} 닫기"
+                       + "   ·   <color=#a8a4b8>분해 · 제작은 마을 대장장이</color>";
+            if (_sortLabel != null) _sortLabel.text = $"{InputGlyphs.Of(Act.AltA)} {SortNames[_sort]}";
+        }
+
+        void Flash(string msg)
+        {
+            if (_compare != null) _compare.text = $"<color=#ff7a6a>{msg}</color>";
+        }
+
+        System.Collections.IEnumerator Pop(RectTransform rt)
+        {
+            float t = 0f;
+            while (t < 0.22f)
+            {
+                t += Time.unscaledDeltaTime;
+                float k = Mathf.Clamp01(t / 0.22f);
+                rt.localScale = Vector3.one * (1f + 0.15f * Mathf.Sin(k * Mathf.PI));
+                yield return null;
+            }
+            rt.localScale = Vector3.one;
+        }
+
+        // ───────────────────────────── 조립 ─────────────────────────────
+
+        void Build()
+        {
+            _panel = WinKit.Build(transform, "InventoryWindow", W, H, "장비", "장비를 끼면 능력치가 오른다 — 던전에서도 바로 바꿀 수 있다", Close, out _root);
+            _win = (RectTransform)_panel.parent;
+
+            _money = UiKit.Text(_panel, "Money", "", 24, TextAlignmentOptions.Right);
+            WinKit.Corner(_money.rectTransform, new Vector2(1f, 1f), new Vector2(-100f, -30f), new Vector2(420f, 44f));
+
+            // ── 장착 칸 ──
+            const float ex = 46f, ey = -150f, colGap = 150f, rowGap = 118f;
+            var cap = UiKit.Text(_panel, "EquipLabel", "장착", 22, TextAlignmentOptions.Left);
+            WinKit.Corner(cap.rectTransform, new Vector2(0f, 1f), new Vector2(ex, -126f), new Vector2(200f, 26f));
+            cap.color = WinKit.ColMuted;
+            for (int col = 0; col < Layout.Length; col++)
+                for (int row = 0; row < Layout[col].Length; row++)
+                {
+                    var s = Layout[col][row];
+                    int idx = (int)s;
+                    var c = ItemCell.Create(_panel, "Slot_" + s, new Vector2(ex + col * colGap, ey - 18f - row * rowGap), SlotSize);
+                    c.Button.onClick.AddListener(() => OnClickSlot(idx));
+                    _slots[idx] = c;
+                }
+
+            // ── 능력치 합계 ──
+            var statBox = WinKit.Box(_panel, "Stats", new Vector2(26f, -642f), new Vector2(316f, 170f));
+            _stats = UiKit.Text(statBox, "Text", "", 20, TextAlignmentOptions.TopLeft);
+            UiKit.Stretch(_stats.rectTransform);
+            _stats.rectTransform.offsetMin = new Vector2(16f, 10f);
+            _stats.rectTransform.offsetMax = new Vector2(-12f, -12f);
+            _stats.textWrappingMode = TextWrappingModes.Normal;
+            _stats.richText = true;
+
+            // ── 가방 ──
+            const float bx = 376f, by = -160f;
+            _bagLabel = UiKit.Text(_panel, "BagLabel", "", 22, TextAlignmentOptions.Left);
+            WinKit.Corner(_bagLabel.rectTransform, new Vector2(0f, 1f), new Vector2(bx, -126f), new Vector2(300f, 28f));
+            _sortLabel = UiKit.Text(_panel, "SortLabel", "", 19, TextAlignmentOptions.Right);
+            float gridW = Cols * Cell + (Cols - 1) * Gap;
+            WinKit.Corner(_sortLabel.rectTransform, new Vector2(0f, 1f), new Vector2(bx + gridW - 260f, -126f), new Vector2(260f, 28f));
+            _sortLabel.color = WinKit.ColMuted;
+
+            var vp = UiKit.Rect(_panel, "BagViewport");
+            WinKit.Corner(vp, new Vector2(0f, 1f), new Vector2(bx - 8f, by + 8f), new Vector2(gridW + 16f, VisibleRows * (Cell + Gap) + 8f));
+            vp.gameObject.AddComponent<RectMask2D>();
+            _content = UiKit.Rect(vp, "Content");
+            _content.anchorMin = _content.anchorMax = new Vector2(0f, 1f);
+            _content.pivot = new Vector2(0f, 1f);
+            _content.anchoredPosition = new Vector2(8f, -8f);
+            _content.sizeDelta = new Vector2(gridW, 10f);
+
+            // ── 설명 ──
+            const float dx = 1100f;
+            var box = WinKit.Box(_panel, "Detail", new Vector2(dx, -150f), new Vector2(274f, 624f));
+            _detail = UiKit.Text(box, "Desc", "", 21, TextAlignmentOptions.TopLeft);
+            WinKit.Corner(_detail.rectTransform, new Vector2(0f, 1f), new Vector2(16f, -14f), new Vector2(244f, 300f));
+            _detail.textWrappingMode = TextWrappingModes.Normal;
+            _detail.richText = true;
+            _compare = UiKit.Text(box, "Compare", "", 19, TextAlignmentOptions.TopLeft);
+            WinKit.Corner(_compare.rectTransform, new Vector2(0f, 1f), new Vector2(16f, -330f), new Vector2(244f, 200f));
+            _compare.textWrappingMode = TextWrappingModes.Normal;
+            _compare.richText = true;
+
+            _act = UiKit.Button(box, "Act", "장착", new Vector2(240f, 52f), 22);
+            UiKit.Style(_act, UiKit.ButtonKind.Primary);
+            UiFocus.NoNav(_act);
+            var art = (RectTransform)_act.transform;
+            art.anchorMin = art.anchorMax = new Vector2(0.5f, 0f);
+            art.anchoredPosition = new Vector2(0f, 40f);
+            _actLabel = _act.GetComponentInChildren<TextMeshProUGUI>();
+            _actLabel.richText = true;
+            _act.onClick.AddListener(DoAction);
+
+            _hint = UiKit.Text(_panel, "Hint", "", 18);
+            _hint.rectTransform.anchorMin = new Vector2(0f, 0f); _hint.rectTransform.anchorMax = new Vector2(1f, 0f);
+            _hint.rectTransform.pivot = new Vector2(0.5f, 0f);
+            _hint.rectTransform.anchoredPosition = new Vector2(0f, 22f);
+            _hint.rectTransform.sizeDelta = new Vector2(-60f, 30f);
+            _hint.color = WinKit.ColMuted;
+            _hint.richText = true;
+        }
+
+        // ── 바깥 안내: [I 장비] + 새 장비 수 ──
+
+        void BuildTag()
+        {
+            var bg = UiKit.Image(transform, "InventoryTag", new Color(0.045f, 0.055f, 0.085f, 0.78f), UiArt.RoundRectFill);
+            bg.type = Image.Type.Sliced;
+            _tag = bg.rectTransform;
+            _tag.anchorMin = _tag.anchorMax = new Vector2(1f, 0f);
+            _tag.pivot = new Vector2(1f, 0f);
+            _tag.anchoredPosition = new Vector2(-28f, 28f);
+            _tag.sizeDelta = new Vector2(190f, 46f);
+            var ol = UiKit.Image(_tag, "Outline", new Color(0.75f, 0.74f, 0.82f, 0.35f), UiArt.RoundRectOutline);
+            ol.type = Image.Type.Sliced;
+            UiKit.Stretch(ol.rectTransform);
+            _tagText = UiKit.Text(_tag, "Text", "", 20);
+            UiKit.Stretch(_tagText.rectTransform);
+            _tagText.richText = true;
+            var b = bg.gameObject.AddComponent<Button>();
+            b.transition = Selectable.Transition.None;
+            UiFocus.NoNav(b);
+            bg.raycastTarget = true;
+            b.onClick.AddListener(() => { if (CanOpen()) Open(); });
+        }
+
+        void RefreshTag()
+        {
+            if (_tagText == null || _run == null) return;
+            int fresh = _run.Inventory.FreshCount;
+            _tagText.text = $"{InputGlyphs.Of(Act.Inventory)}  장비" + (fresh > 0 ? $"  <color=#ffd45a>NEW {fresh}</color>" : "");
+            _tag.sizeDelta = new Vector2(fresh > 0 ? 250f : 170f, 46f);
+        }
+
+        void UpdateTag()
+        {
+            if (_tag == null || _run == null) return;
+            bool show = (_run.Phase == RunPhase.Village || _run.Phase == RunPhase.InDungeon) && !UiFocus.Blocked
+                        && !SystemMenu.IsOpen && !GiveUpMenu.IsOpen && !SettingsView.IsOpen;
+            if (_tag.gameObject.activeSelf != show) _tag.gameObject.SetActive(show);
+            if (show && _run.Inventory.FreshCount > 0)
+                _tagText.alpha = 0.8f + 0.2f * Mathf.Sin(Time.unscaledTime * 4f);
+            else if (show) _tagText.alpha = 1f;
+        }
+    }
+}
