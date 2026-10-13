@@ -1,0 +1,188 @@
+using System.Collections.Generic;
+using UnityEngine;
+
+namespace Proto.Feel
+{
+    /// <summary>
+    /// 스킬 이펙트 배정표 — 산 이펙트 팩(Hovl Studio · ARPG Effects)의 프리팹을 스킬 타이밍에 띄운다.
+    ///
+    ///   "스킬 이름" + 몇 번째 타(0부터) → 띄울 프리팹 목록
+    ///   타 번호  -1 = 스킬 시작할 때 · 0, 1, 2… = 그 타가 나갈 때 · Any = 모든 타
+    ///   위치     Offset = (앞, 위, 깊이) m — 앞은 바라보는 쪽, 깊이 +는 화면 안쪽
+    ///   방향     Euler = 바라보는 쪽 기준 추가 회전. 프리팹은 +Z가 앞이라 오른쪽을 보면 Y 90°를 먼저 돌린다
+    ///   Follow   true면 플레이어에 붙어 같이 움직인다 (회전 · 돌진)
+    ///
+    /// 프리팹 찾기: 이름만 쓴다. 에디터가 스크립트를 다시 읽을 때 Resources/Fx/SkillVfxLibrary 에 모아 둔다
+    ///   (Editor/SkillVfxLibraryBuilder.cs — 손댈 필요 없음).
+    /// 표에 있는 스킬은 예전 직접 만든 이펙트(HitFx.Slash · SkillFx) 대신 이걸 쓴다.
+    /// 이펙트 팩은 데모용으로 반복(loop)이 켜져 있어서, 띄울 때 반복을 끄고 Life초 뒤에 지운다. 팩의 효과음은 끈다.
+    /// </summary>
+    public static class SkillVfx
+    {
+        public const int Start = -1, Any = -2;
+
+        public struct Fx
+        {
+            public string Skill; public int Hit; public string Prefab;
+            public Vector3 Offset, Euler; public float Scale; public bool Follow; public float Life;
+            public Fx(string skill, int hit, string prefab, Vector3 offset, Vector3 euler, float scale = 1f, bool follow = false, float life = 2.5f)
+            { Skill = skill; Hit = hit; Prefab = prefab; Offset = offset; Euler = euler; Scale = scale; Follow = follow; Life = life; }
+        }
+
+        static readonly Vector3 Waist = new Vector3(0.6f, 1.0f, 0f);
+
+        /// <summary>배정표. 바꾸고 싶으면 여기만 고치면 된다.</summary>
+        public static readonly Fx[] Table =
+        {
+            // 돌진베기 → Z — 낮게 가로로 두 번
+            new Fx("돌진베기", 0, "Sword Slash 13", new Vector3(0.5f, 0.9f, 0f), new Vector3(0f, 0f, 8f), 1.1f, follow: true),
+            new Fx("돌진베기", 1, "Sword Slash 10", new Vector3(0.6f, 1.0f, 0f), new Vector3(0f, 0f, -10f), 1.1f),
+            // 올려베기 Z — 앞 아래에서 위로 쳐 올리는 세운 베기 (Z +70° — -70°면 위에서 아래로 내려감)
+            new Fx("올려베기", 0, "Sword Slash 1", new Vector3(0.6f, 1.1f, 0f), new Vector3(0f, 0f, 70f), 1.0f),
+            // 내려찍기 ↓ Z — 위에서 내려치는 세로 베기 + 바닥 충격
+            new Fx("내려찍기", 0, "Sword Slash 8", new Vector3(1.0f, 0.4f, 0f), Vector3.zero, 1.2f),
+            new Fx("내려찍기", 0, "Meteor hit 2", new Vector3(1.6f, 0.05f, 0f), Vector3.zero, 0.9f),
+            // 회전베기 ↓↑ Z — 몸 둘레를 도는 고리, 타마다
+            new Fx("회전베기", Any, "Sword Slash 2", new Vector3(0f, 0.8f, 0f), Vector3.zero, 0.85f, follow: true),
+            // 연속 찌르기 →→ X — 찌를 때마다 앞으로 뻗는 찌르기
+            new Fx("연속 찌르기", Any, "Prick 3", new Vector3(0.3f, 1.05f, 0f), Vector3.zero, 0.9f),
+            // 질풍참 →→ Z — 가로 · 가로 · 크게
+            new Fx("질풍참", 0, "Sword Slash 13", new Vector3(0.5f, 1.0f, 0f), new Vector3(0f, 0f, 12f), 1.0f, follow: true),
+            new Fx("질풍참", 1, "Sword Slash 10", new Vector3(0.5f, 1.0f, 0f), new Vector3(0f, 0f, -12f), 1.0f, follow: true),
+            new Fx("질풍참", 2, "Sword Slash 14", new Vector3(0.9f, 0.9f, 0f), Vector3.zero, 1.3f),
+            // 검기 날리기 ←→ Z — 휘두르는 순간 + 날아가는 검기 (Wave = 검기에 붙는다)
+            new Fx("검기 날리기", 0, "Sword Slash 1", new Vector3(0.6f, 1.0f, 0f), new Vector3(0f, 0f, -20f), 1.1f),
+            new Fx("검기 날리기", Wave, "Slash wave", new Vector3(0f, 0.9f, 0f), new Vector3(0f, 0f, 90f), 1.0f, follow: true, life: 3f),
+            // 발도술 ↓→ Z — 크고 날카로운 일자 베기 + 앞에서 터짐
+            new Fx("발도술", 0, "Sword Slash 13", new Vector3(1.0f, 1.0f, 0f), new Vector3(0f, 0f, 4f), 1.8f),
+            new Fx("발도술", 0, "Energy explosion", new Vector3(2.4f, 0.9f, 0f), Vector3.zero, 1.0f),
+            // 반격 자세 ↓↑ X — 되받아치는 베기
+            new Fx("반격 자세", 0, "Sword Slash 14", new Vector3(0.8f, 0.9f, 0f), Vector3.zero, 1.2f),
+            // 낙화참 →↑ Z — 꽃잎 · 공중 베기 · 내려와 땅이 솟는다
+            new Fx("낙화참", Start, "Flower slash", new Vector3(0f, 0.2f, 0f), Vector3.zero, 0.8f, follow: true, life: 3f),
+            new Fx("낙화참", 0, "Sword Slash 10", new Vector3(0.4f, 1.6f, 0f), new Vector3(0f, 0f, 20f), 1.0f, follow: true),
+            new Fx("낙화참", 1, "Sword Slash 13", new Vector3(0.4f, 1.6f, 0f), new Vector3(0f, 0f, -20f), 1.0f, follow: true),
+            new Fx("낙화참", 2, "Spikes attack", new Vector3(0.3f, 0.05f, 0f), Vector3.zero, 1.0f),
+            new Fx("낙화참", 2, "Sword Slash 8", new Vector3(0.8f, 0.4f, 0f), Vector3.zero, 1.2f),
+            // 대지 가르기 ↑↓ Z — 궁극기: 공간이 갈라지는 큰 고리 + 충격
+            new Fx("대지 가르기", 0, "Spatial section", new Vector3(0.5f, 0.05f, 0f), Vector3.zero, 0.8f, life: 3.5f),
+            new Fx("대지 가르기", 0, "Meteor hit 2", new Vector3(0.8f, 0.05f, 0f), Vector3.zero, 1.4f),
+        };
+
+        public const int Wave = -3;
+
+        /// <summary>적이 맞은 자리에 터지는 작은 타격 — 모든 스킬 공통.</summary>
+        public const string ImpactPrefab = "";   // 비움 — 'Knife hit'은 칼이 땅에 꽂히는 모양이라 뺐다. 적중은 원래 스파크(HitFx)만
+        /// <summary>반격 성공 — 막는 순간.</summary>
+        public const string BlockPrefab = "ShieldHit";
+
+        // ───────────────────────────── 띄우기 ─────────────────────────────
+
+        static Dictionary<string, GameObject> _lib;
+
+        static GameObject Find(string name)
+        {
+            if (_lib == null)
+            {
+                _lib = new Dictionary<string, GameObject>();
+                var lib = Resources.Load<SkillVfxLibrary>("Fx/SkillVfxLibrary");
+                if (lib != null)
+                    for (int i = 0; i < lib.Names.Count && i < lib.Prefabs.Count; i++)
+                        if (lib.Prefabs[i] != null) _lib[lib.Names[i]] = lib.Prefabs[i];
+            }
+            return _lib.TryGetValue(name, out var p) ? p : null;
+        }
+
+        /// <summary>표에 이 스킬 · 타가 있는가 (있으면 예전 이펙트는 안 띄운다).</summary>
+        public static bool Has(string skill)
+        {
+            foreach (var f in Table) if (f.Skill == skill) return true;
+            return false;
+        }
+
+        /// <summary>그 스킬 · 타에 배정된 이펙트를 전부 띄운다. 하나라도 띄웠으면 true.</summary>
+        public static bool Play(string skill, int hit, Transform owner, bool right)
+        {
+            bool any = false;
+            foreach (var f in Table)
+            {
+                if (f.Skill != skill) continue;
+                if (f.Hit != hit && !(f.Hit == Any && hit >= 0)) continue;
+                any |= Spawn(f, owner, right) != null;
+            }
+            return any;
+        }
+
+        /// <summary>검기 — 날아가는 오브젝트에 붙일 이펙트들. 검기가 사라지면 Release.</summary>
+        public static List<GameObject> AttachWave(string skill, Transform wave, bool right)
+        {
+            var list = new List<GameObject>();
+            foreach (var f in Table)
+                if (f.Skill == skill && f.Hit == Wave) { var go = Spawn(f, wave, right); if (go != null) list.Add(go); }
+            return list;
+        }
+
+        public static void Impact(Vector3 at, bool right, bool heavy)
+        {
+            if (string.IsNullOrEmpty(ImpactPrefab)) return;
+            var p = Find(ImpactPrefab);
+            if (p == null) return;
+            var go = Object.Instantiate(p, at, Facing(right) * p.transform.rotation);
+            if (heavy) go.transform.localScale = p.transform.localScale * 1.5f;
+            Prepare(go, 1.5f);
+        }
+
+        public static void Block(Vector3 at)
+        {
+            var p = Find(BlockPrefab);
+            if (p == null) return;
+            var go = Object.Instantiate(p, at, p.transform.rotation);
+            Prepare(go, 1.5f);
+        }
+
+        static Quaternion Facing(bool right) => Quaternion.Euler(0f, right ? 90f : -90f, 0f);
+
+        static GameObject Spawn(Fx f, Transform owner, bool right)
+        {
+            var p = Find(f.Prefab);
+            if (p == null || owner == null) return null;
+            var fwd = right ? Vector3.right : Vector3.left;
+            var pos = owner.position + fwd * f.Offset.x + Vector3.up * f.Offset.y + Vector3.forward * f.Offset.z;
+            var rot = Facing(right) * Quaternion.Euler(f.Euler) * p.transform.rotation;
+            var go = Object.Instantiate(p, pos, rot);
+            go.transform.localScale = p.transform.localScale * f.Scale;
+            if (f.Follow) go.transform.SetParent(owner, true);
+            Prepare(go, f.Life);
+            return go;
+        }
+
+        /// <summary>데모용 반복 끄기 · 효과음 끄기 · 시간 지나면 지우기.</summary>
+        static void Prepare(GameObject go, float life)
+        {
+            foreach (var ps in go.GetComponentsInChildren<ParticleSystem>(true)) { var m = ps.main; m.loop = false; }
+            foreach (var a in go.GetComponentsInChildren<AudioSource>(true)) a.mute = true;
+            Object.Destroy(go, life);
+        }
+
+        /// <summary>붙여 둔 이펙트를 떼어 낸다 — 새로 뿜지 않고 남은 것만 사라진다.</summary>
+        public static void Release(List<GameObject> fx, float linger = 0.6f)
+        {
+            if (fx == null) return;
+            foreach (var go in fx)
+            {
+                if (go == null) continue;
+                go.transform.SetParent(null, true);
+                foreach (var ps in go.GetComponentsInChildren<ParticleSystem>()) ps.Stop(true, ParticleSystemStopBehavior.StopEmitting);
+                Object.Destroy(go, linger);
+            }
+        }
+
+        /// <summary>표 · 공통 이펙트에 쓰인 프리팹 이름 전부 — 에디터가 라이브러리를 만들 때 쓴다.</summary>
+        public static IEnumerable<string> AllPrefabNames()
+        {
+            if (!string.IsNullOrEmpty(ImpactPrefab)) yield return ImpactPrefab;
+            yield return BlockPrefab;
+            foreach (var f in Table) yield return f.Prefab;
+        }
+    }
+}

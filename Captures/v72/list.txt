@@ -1,0 +1,52 @@
+Assets/Hovl Studio/Sword slash VFX/Prefabs/Prick 1.prefab
+Assets/Hovl Studio/Sword slash VFX/Prefabs/Prick 2.prefab
+Assets/Hovl Studio/Sword slash VFX/Prefabs/Prick 3.prefab
+Assets/Hovl Studio/Sword slash VFX/Prefabs/Prick 4.prefab
+Assets/Hovl Studio/Sword slash VFX/Prefabs/Prick 5.prefab
+Assets/Hovl Studio/Sword slash VFX/Prefabs/Slash wave.prefab
+Assets/Hovl Studio/Sword slash VFX/Prefabs/Spatial section.prefab
+Assets/Hovl Studio/Sword slash VFX/Prefabs/Spikes attack.prefab
+Assets/Hovl Studio/Sword slash VFX/Prefabs/Sword Slash 1.prefab
+Assets/Hovl Studio/Sword slash VFX/Prefabs/Sword Slash 10.prefab
+Assets/Hovl Studio/Sword slash VFX/Prefabs/Sword Slash 11.prefab
+Assets/Hovl Studio/Sword slash VFX/Prefabs/Sword Slash 12.prefab
+Assets/Hovl Studio/Sword slash VFX/Prefabs/Sword Slash 13.prefab
+Assets/Hovl Studio/Sword slash VFX/Prefabs/Sword Slash 14.prefab
+Assets/Hovl Studio/Sword slash VFX/Prefabs/Sword Slash 15.prefab
+Assets/Hovl Studio/Sword slash VFX/Prefabs/Sword Slash 16.prefab
+Assets/Hovl Studio/Sword slash VFX/Prefabs/Sword Slash 17.prefab
+Assets/Hovl Studio/Sword slash VFX/Prefabs/Sword Slash 2.prefab
+Assets/Hovl Studio/Sword slash VFX/Prefabs/Sword Slash 3.prefab
+Assets/Hovl Studio/Sword slash VFX/Prefabs/Sword Slash 4.prefab
+Assets/Hovl Studio/Sword slash VFX/Prefabs/Sword Slash 5.prefab
+Assets/Hovl Studio/Sword slash VFX/Prefabs/Sword Slash 6.prefab
+Assets/Hovl Studio/Sword slash VFX/Prefabs/Sword Slash 7.prefab
+Assets/Hovl Studio/Sword slash VFX/Prefabs/Sword Slash 8.prefab
+Assets/Hovl Studio/Sword slash VFX/Prefabs/Sword Slash 9.prefab
+Assets/Hovl Studio/Sword slash VFX/Prefabs/Sword Slash Combo 1.prefab
+Assets/Hovl Studio/Sword slash VFX/Prefabs/Sword Slash Combo 2.prefab
+Assets/Hovl Studio/Sword slash VFX/Prefabs/Sword Slash Combo 3.prefab
+Assets/Hovl Studio/Sword slash VFX/Prefabs/Sword Slash Combo 4.prefab
+Assets/Hovl Studio/Sword slash VFX/Prefabs/Sword Slash Combo 5.prefab
+Assets/Hovl Studio/Sword slash VFX/Prefabs/Sword Slash Combo 6.prefab
+Assets/Hovl Studio/Sword slash VFX/Prefabs/Sword Slash Combo 7.prefab
+Assets/Hovl Studio/Sword slash VFX/Prefabs/Sword Slash Combo 8.prefab
+Assets/Hovl Studio/Sword slash VFX/Prefabs/Sword Slash Combo 9.prefab
+Assets/Hovl Studio/Sword slash VFX/Prefabs/Sword Slash mirror.prefab
+Assets/Hovl Studio/AOE Magic spells Vol.1/Prefabs/Energy explosion.prefab
+Assets/Hovl Studio/AOE Magic spells Vol.1/Prefabs/Flower slash.prefab
+Assets/Hovl Studio/AOE Magic spells Vol.1/Prefabs/Front spikes attack.prefab
+Assets/Hovl Studio/AOE Magic spells Vol.1/Prefabs/Ise attack.prefab
+Assets/Hovl Studio/AOE Magic spells Vol.1/Prefabs/Knife hit.prefab
+Assets/Hovl Studio/AOE Magic spells Vol.1/Prefabs/Knives.prefab
+Assets/Hovl Studio/AOE Magic spells Vol.1/Prefabs/Leaves buff.prefab
+Assets/Hovl Studio/AOE Magic spells Vol.1/Prefabs/Lightning hit.prefab
+Assets/Hovl Studio/AOE Magic spells Vol.1/Prefabs/Lightning strike.prefab
+Assets/Hovl Studio/AOE Magic spells Vol.1/Prefabs/Magic attack.prefab
+Assets/Hovl Studio/AOE Magic spells Vol.1/Prefabs/Magic hit.prefab
+Assets/Hovl Studio/AOE Magic spells Vol.1/Prefabs/Meteor 2.prefab
+Assets/Hovl Studio/AOE Magic spells Vol.1/Prefabs/Meteor hit 2.prefab
+Assets/Hovl Studio/AOE Magic spells Vol.1/Prefabs/Meteor hit.prefab
+Assets/Hovl Studio/AOE Magic spells Vol.1/Prefabs/Meteor shower 2.prefab
+Assets/Hovl Studio/AOE Magic spells Vol.1/Prefabs/Meteor shower.prefab
+Assets/Hovl Studio/AOE Magic spells Vol.1/Prefabs/Meteor.prefab

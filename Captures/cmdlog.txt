@@ -1,0 +1,10 @@
+0.02 skill -
+0.31 L down
+0.51 L up
+1.61 Z, tokens 1
+1.63 skill 올려베기
+2.41 skill -
+4.00 L hold
+5.20 L+Z
+5.22 skill 올려베기
+6.02 skill -

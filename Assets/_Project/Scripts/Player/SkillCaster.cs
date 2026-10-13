@@ -10,7 +10,7 @@ namespace Proto.Player
     ///
     /// 커맨드
     ///   방향키를 누른 순간들을 기억해 두었다가 Z(스킬)·X(공격)를 누르면 맞는 스킬을 찾는다.
-    ///   키 사이 간격이 설정의 '커맨드 입력 여유'(기본 0.35초) 안이어야 한 커맨드로 친다.
+    ///   키 사이 간격이 설정의 '커맨드 입력 여유'(기본 0.2초) 안이어야 한 커맨드로 친다.
     ///   방향은 첫 키를 누를 때 바라보던 쪽 기준 — 뒤로 누르면 몸이 돌지만 커맨드는 '뒤'로 읽는다 (← X 반격 자세).
     ///   그렇게 읽어서 맞는 게 없으면 지금 바라보는 쪽 기준으로 한 번 더 찾는다 (돌아서서 → Z 돌진).
     ///   여러 개가 맞으면 긴 커맨드가 이긴다 (↓→ Z 발도술이 → Z 돌진보다 먼저).
@@ -224,7 +224,7 @@ namespace Proto.Player
         Spec Match(char button, out bool face)
         {
             face = _pc.FacingRight;
-            float window = Mathf.Max(0.2f, GameSettings.Data.commandWindow);
+            float window = Mathf.Max(0.1f, GameSettings.Data.commandWindow);
             float now = Time.unscaledTime;
 
             // 끝에서부터 간격이 여유 안인 토큰만 이어 붙인다
@@ -320,7 +320,10 @@ namespace Proto.Player
             Play(s.State, s.Offset);
             if (feel != null) feel.SwingSfx();
             // 회전베기 — 몸 둘레를 도는 궤적 · 발밑 소용돌이 · 흙먼지 (휠윈드)
-            if (s.Name == "회전베기") Proto.Feel.SkillFx.Whirl(transform, (s.End - s.Offset) / Mathf.Max(0.1f, s.Speed), 2.6f, !_pc.FacingRight);
+            // 스킬 이펙트 — 배정표(Feel/SkillVfx)에 있는 스킬은 산 이펙트 팩으로, 없으면 예전 직접 만든 것
+            if (Proto.Feel.SkillVfx.Has(s.Name)) Proto.Feel.SkillVfx.Play(s.Name, Proto.Feel.SkillVfx.Start, transform, _pc.FacingRight);
+            if (IsFinisher(s)) Proto.Feel.Cinematic.Windup();   // 큰 한 방 — 쓰는 순간 화면이 살짝 당겨진다
+            else if (s.Name == "회전베기") Proto.Feel.SkillFx.Whirl(transform, (s.End - s.Offset) / Mathf.Max(0.1f, s.Speed), 2.6f, !_pc.FacingRight);
             return true;
         }
 
@@ -406,7 +409,13 @@ namespace Proto.Player
             var feel = Proto.Feel.Feel.I;
 
             // 칼 지나간 자리
-            if (origin == null)
+            if (origin == null && Proto.Feel.SkillVfx.Has(s.Name))
+            {
+                int hitIndex = s.Kind == Kind.Counter ? 0 : _nextHit - 1;
+                Proto.Feel.SkillVfx.Play(s.Name, hitIndex, transform, _pc.FacingRight);
+                if (h.Heavy) Proto.Feel.HitFx.Impact(o + fwd * (h.Shape == Shape.Around ? 0f : 1.4f) + Vector3.up * 0.2f, true);
+            }
+            else if (origin == null)
             {
                 Vector3 swing = o + fwd * 1.0f + Vector3.up * 1.0f;
                 if (h.Shape == Shape.Around)
@@ -465,6 +474,7 @@ namespace Proto.Player
                     var at = hp.transform.position + Vector3.up * 0.9f - fwd * 0.3f;
                     feel.Spark(at, fwd, kill || h.Heavy);
                     Proto.Feel.HitFx.Impact(at, kill || h.Heavy);
+                    Proto.Feel.SkillVfx.Impact(at, _pc.FacingRight, kill || h.Heavy);
                     feel.Number(at + Vector3.up * 0.6f, dmg, kill ? Proto.Feel.Feel.NumberKind.Kill : crit ? Proto.Feel.Feel.NumberKind.Crit : Proto.Feel.Feel.NumberKind.Normal);
                 }
             }
@@ -475,6 +485,7 @@ namespace Proto.Player
                 {
                     feel.HitStop(cfg.killHitStopScale);
                     feel.Shake(fwd, h.Mul >= 5f ? 2.4f : 1.5f);
+                    Proto.Feel.ScreenPunch.Heavy();   // 색수차 + 렌즈 펀치 (MMFeedbacks)
                     if (connected > 0) feel.KillSfx();
                     Proto.Feel.Haptics.Pulse(0.45f, 0.75f, h.Mul >= 5f ? 0.3f : 0.15f);
                 }
@@ -482,18 +493,24 @@ namespace Proto.Player
                 {
                     feel.HitStop(0.7f);
                     feel.Shake(fwd, 0.6f);
+                    Proto.Feel.ScreenPunch.Light();
                     feel.HitSfx();
                     Proto.Feel.Haptics.Pulse(0.15f, 0.3f, 0.05f);
                 }
             }
+            // 큰 한 방 연출 — 화면 당김 · 흑백 번쩍 · 소리 먹먹 · 슬로모션 (MMFeedbacks)
+            if (origin == null && h.Heavy && IsFinisher(s)) Proto.Feel.Cinematic.Finisher(s.Name == "대지 가르기" ? 0.25f : 0.35f, s.Name == "대지 가르기" ? 0.7f : 0.5f);
             return connected;
         }
+
+        static bool IsFinisher(Spec s) => s.Name == "발도술" || s.Name == "대지 가르기";
 
         // ── 검기 ──
 
         void SpawnWave(Spec s, Hit h)
         {
-            Proto.Feel.HitFx.Slash(transform.position + Forward * 1.0f + Vector3.up * 1.0f, _pc.FacingRight, 2, 3.6f);
+            if (!Proto.Feel.SkillVfx.Play(s.Name, 0, transform, _pc.FacingRight))
+                Proto.Feel.HitFx.Slash(transform.position + Forward * 1.0f + Vector3.up * 1.0f, _pc.FacingRight, 2, 3.6f);
             var go = new GameObject("SwordWave");
             go.transform.position = transform.position + Vector3.up * 0.1f + Forward * 0.8f;
             var w = go.AddComponent<SwordWave>();
@@ -506,11 +523,12 @@ namespace Proto.Player
 
         class SwordWave : MonoBehaviour
         {
-            SkillCaster _owner; Spec _s; Hit _h; Vector3 _dir; bool _right; float _life, _fx; GameObject _trail;
+            SkillCaster _owner; Spec _s; Hit _h; Vector3 _dir; bool _right; float _life, _fx; GameObject _trail; List<GameObject> _packFx;
             readonly HashSet<Health> _once = new();
 
             public void Init(SkillCaster owner, Spec s, Hit h, Vector3 dir, bool right, float life)
-            { _owner = owner; _s = s; _h = new Hit { At = h.At, Mul = h.Mul, Reach = 1.2f, Depth = h.Depth, Knock = h.Knock, Stun = h.Stun }; _dir = dir; _right = right; _life = life; _trail = Proto.Feel.SkillFx.WaveTrail(transform, right); }   // 초승달 검기 파티클
+            { _owner = owner; _s = s; _h = new Hit { At = h.At, Mul = h.Mul, Reach = 1.2f, Depth = h.Depth, Knock = h.Knock, Stun = h.Stun }; _dir = dir; _right = right; _life = life; _packFx = Proto.Feel.SkillVfx.AttachWave(s.Name, transform, right);
+              if (_packFx.Count == 0) _trail = Proto.Feel.SkillFx.WaveTrail(transform, right); }   // 이펙트 팩 검기 — 없으면 직접 만든 초승달
 
             void Update()
             {
@@ -519,7 +537,7 @@ namespace Proto.Player
                 _life -= dt;
                 _fx -= dt;
                 if (_owner != null) _owner.WaveStrike(_s, _h, transform.position - _dir * 0.6f, _once);
-                if (_life <= 0f) { Proto.Feel.SkillFx.Release(_trail); Destroy(gameObject); }
+                if (_life <= 0f) { Proto.Feel.SkillFx.Release(_trail); Proto.Feel.SkillVfx.Release(_packFx); Destroy(gameObject); }
             }
         }
 
@@ -566,6 +584,7 @@ namespace Proto.Player
                 feel.HitStop(1.6f);
                 Proto.Feel.HitFx.Impact(transform.position + Forward * 0.6f + Vector3.up * 1.1f, true);
             }
+            Proto.Feel.SkillVfx.Block(transform.position + Forward * 0.6f + Vector3.up * 1.1f);
             Proto.Feel.Haptics.Pulse(0.3f, 0.8f, 0.12f);
             return true;
         }

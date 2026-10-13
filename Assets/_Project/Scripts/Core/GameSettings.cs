@@ -12,7 +12,7 @@ namespace Proto.Core
     [Serializable]
     public class SettingsData
     {
-        public int version = 1;
+        public int version = 2;   // 2: 커맨드 입력 여유 기본 0.35 → 0.2
 
         // 화면
         public int displayMode = 1;          // 0 전체화면(독점) · 1 테두리 없는 창 · 2 창모드
@@ -36,7 +36,7 @@ namespace Proto.Core
         public bool reduceFlashes = false;   // 히트스톱 짧게 · 흰 번쩍임 없음
         public bool damageNumbers = true;
         public float uiScale = 1f;           // 0.9 ~ 1.3
-        public float commandWindow = 0.35f;  // 커맨드 입력 여유 (초) — 스킬 커맨드 판정이 쓴다
+        public float commandWindow = 0.2f;   // 커맨드 입력 여유 (초) — 스킬 커맨드 판정이 쓴다
         public bool autoPause = true;        // 창이 비활성이면 던전 일시정지
     }
 
@@ -54,7 +54,7 @@ namespace Proto.Core
 
         public static readonly int[] FpsChoices = { 0, 30, 60, 120, 144, 240 };
         public static readonly float[] UiScales = { 0.9f, 1f, 1.1f, 1.2f, 1.3f };
-        public static readonly float[] CommandWindows = { 0.25f, 0.35f, 0.5f, 0.7f };
+        public static readonly float[] CommandWindows = { 0.15f, 0.2f, 0.3f, 0.45f };   // 짧게 · 보통 · 넉넉하게 · 아주 넉넉하게
 
         public static void Load()
         {
@@ -63,6 +63,7 @@ namespace Proto.Core
                 if (File.Exists(FilePath)) Data = JsonUtility.FromJson<SettingsData>(File.ReadAllText(FilePath)) ?? new SettingsData();
             }
             catch (Exception e) { Debug.LogWarning("[Settings] 설정을 읽지 못해 기본값을 씁니다: " + e.Message); Data = new SettingsData(); }
+            if (Data.version < 2) { Data.commandWindow = 0.2f; Data.version = 2; Save(); }   // 예전 기본값(0.35)은 너무 넉넉했다
             ApplyAll();
         }
 

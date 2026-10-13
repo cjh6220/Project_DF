@@ -14,6 +14,7 @@ namespace Proto.UI
     ///
     ///   탭    화면 · 사운드 · 조작 · 게임
     ///   조작  ↑↓ 줄 고르기 · ←→ 값 바꾸기 · 결정키 = 다음 값 · Q/E (L1/R1) 탭 · Esc 닫기 (마우스는 ◀ ▶ 클릭)
+    ///         슬라이더 줄 — ←→ 한 칸씩, 누르고 있으면 빠르게 · 마우스로 끌기 · 막대 아무 데나 클릭
     ///         맨 위 = 탭 줄, 맨 아래 = [기본값으로] [닫기] 줄 — 마우스 없이 모든 버튼에 닿는다
     ///
     /// 바꾸는 즉시 적용 · 저장한다 (GameSettings.Commit). 따로 "적용" 버튼이 없다.
@@ -38,12 +39,21 @@ namespace Proto.UI
             public Image Bg;
             public TextMeshProUGUI LabelText, ValueText;
             public GameObject Arrows;
+            public string Desc;           // 고르면 아래에 보이는 설명 한 줄
+            // 슬라이더 줄 — 정수 칸(Min~Max)으로 움직인다. Get/Set은 칸 번호
+            public bool IsSlider;
+            public int Min, Max, Mark = int.MinValue;   // Mark = 기본값 눈금
+            public Func<int> Get;
+            public Action<int> Set;
+            public Slider Slider;
+            public Image Knob, Fill;
         }
 
         RectTransform _root, _panel, _list;
         readonly List<Button> _tabs = new();
         readonly List<Row> _rows = new();
-        TextMeshProUGUI _hint;
+        TextMeshProUGUI _hint, _desc;
+        float _holdT, _repeatT;           // 슬라이더 — 누르고 있으면 반복
         int _tab, _focus;                 // _focus -1 = 탭 줄, _rows.Count = 아래 버튼 줄
         int _bottom = 1;                  // 아래 줄에서 고른 버튼 (0 기본값으로 · 1 닫기)
         Button _reset, _close;
@@ -145,6 +155,11 @@ namespace Proto.UI
             _hint = UiKit.Text(_panel, "Hint", "", 17);
             UiKit.Place(_hint.rectTransform, new Vector2(0.5f, 0f), new Vector2(0f, 104f), new Vector2(760f, 26f));   // 아래 버튼 줄 바로 위
             _hint.color = new Color(1f, 1f, 1f, 0.5f);
+
+            _desc = UiKit.Text(_panel, "Desc", "", 18);
+            UiKit.Place(_desc.rectTransform, new Vector2(0.5f, 0f), new Vector2(0f, 150f), new Vector2(RowW - 40f, 52f));   // 고른 줄 설명
+            _desc.color = new Color(0.86f, 0.82f, 0.72f, 0.9f);
+            _desc.textWrappingMode = TextWrappingModes.Normal;
         }
 
         void ShowTab(int t)
@@ -176,6 +191,15 @@ namespace Proto.UI
 
         void Add(string label, Func<string> value, Action<int> step, Action activate = null, Func<bool> enabled = null)
             => _rows.Add(new Row { Label = label, Value = value, Step = step, Activate = activate, Enabled = enabled });
+
+        /// <summary>슬라이더 줄 — 칸(min~max 정수)을 ←→ · 마우스로 움직인다.</summary>
+        void SliderRow(string label, int min, int max, Func<int> get, Action<int> set, Func<int, string> fmt, string desc = null, int mark = int.MinValue)
+            => _rows.Add(new Row
+            {
+                Label = label, IsSlider = true, Min = min, Max = max, Get = get, Set = set, Mark = mark, Desc = desc,
+                Value = () => fmt(get()),
+                Step = d => set(Mathf.Clamp(get() + d, min, max)),
+            });
 
         void Toggle(string label, Func<bool> get, Action<bool> set, bool display = false)
             => Add(label, () => OnOff(get()), _ => { set(!get()); GameSettings.Commit(display); });
@@ -238,6 +262,12 @@ namespace Proto.UI
             Add("버튼 표시", () => glyphs[Mathf.Clamp(D.glyphMode, 0, 3)],
                 d => { D.glyphMode = Wrap(D.glyphMode + d, 4); GameSettings.Commit(); });
             Toggle("패드 진동", () => D.vibration, v => D.vibration = v);
+            SliderRow("커맨드 입력 여유", 10, 45,
+                () => Mathf.RoundToInt(D.commandWindow * 100f),
+                v => { D.commandWindow = v / 100f; GameSettings.Commit(); },
+                v => (v / 100f).ToString("0.00") + "초",
+                "방향키와 Z · X 사이에 허용하는 시간이에요. 짧을수록 이동하다 커맨드가 잘못 나가는 일이 줄고, 길수록 커맨드를 넣기 쉬워요.  <color=#ffd45a>기본 0.20초</color>",
+                20);
 
             // 키 재설정은 넣지 않는다 — 스킬 커맨드(방향 + Z/X)가 키 배치에 묶여 있다
         }
@@ -252,17 +282,6 @@ namespace Proto.UI
             {
                 int i = Array.FindIndex(GameSettings.UiScales, s => Mathf.Approximately(s, D.uiScale));
                 D.uiScale = GameSettings.UiScales[Mathf.Clamp((i < 0 ? 1 : i) + d, 0, GameSettings.UiScales.Length - 1)];
-                GameSettings.Commit();
-            });
-            string[] cw = { "짧게", "보통", "넉넉하게", "아주 넉넉하게" };
-            Add("커맨드 입력 여유", () =>
-            {
-                int i = Array.FindIndex(GameSettings.CommandWindows, s => Mathf.Approximately(s, D.commandWindow));
-                return cw[i < 0 ? 1 : i];
-            }, d =>
-            {
-                int i = Array.FindIndex(GameSettings.CommandWindows, s => Mathf.Approximately(s, D.commandWindow));
-                D.commandWindow = GameSettings.CommandWindows[Mathf.Clamp((i < 0 ? 1 : i) + d, 0, GameSettings.CommandWindows.Length - 1)];
                 GameSettings.Commit();
             });
             Toggle("창이 비활성이면 일시정지", () => D.autoPause, v => D.autoPause = v);
@@ -297,6 +316,8 @@ namespace Proto.UI
             vr.anchorMin = new Vector2(0.5f, 0f); vr.anchorMax = new Vector2(1f, 1f);
             vr.offsetMin = new Vector2(50f, 0f); vr.offsetMax = new Vector2(-50f, 0f);
 
+            if (r.IsSlider) BuildSlider(r, idx);
+
             if (r.Step != null)
             {
                 var arrows = UiKit.Rect(r.Rt, "Arrows");
@@ -313,6 +334,74 @@ namespace Proto.UI
                 r.ValueText.raycastTarget = true;
                 b.onClick.AddListener(() => { _focus = idx; DoActivate(idx); });
             }
+        }
+
+        /// <summary>값 자리 = [◀ ━━━━●━━━ 0.20초 ▶]. 막대는 uGUI Slider라 끌기 · 클릭이 된다. 키 조작은 Update가 한다.</summary>
+        void BuildSlider(Row r, int idx)
+        {
+            // 숫자는 오른쪽 ▶ 바로 앞
+            var vr = r.ValueText.rectTransform;
+            vr.anchorMin = new Vector2(1f, 0f); vr.anchorMax = new Vector2(1f, 1f);
+            vr.offsetMin = new Vector2(-142f, 0f); vr.offsetMax = new Vector2(-46f, 0f);
+            r.ValueText.alignment = TextAlignmentOptions.Right;
+
+            var area = UiKit.Rect(r.Rt, "Slider");
+            area.anchorMin = new Vector2(0.5f, 0.5f); area.anchorMax = new Vector2(1f, 0.5f);
+            area.offsetMin = new Vector2(56f, -12f); area.offsetMax = new Vector2(-156f, 12f);
+
+            var track = UiKit.Image(area, "Track", new Color(0f, 0f, 0f, 0.55f), UiArt.RoundRectFill, true);
+            track.type = Image.Type.Sliced;
+            var tr = track.rectTransform;
+            tr.anchorMin = new Vector2(0f, 0.5f); tr.anchorMax = new Vector2(1f, 0.5f);
+            tr.sizeDelta = new Vector2(0f, 8f);
+            var rim = UiKit.Image(tr, "Rim", new Color(0.75f, 0.75f, 0.8f, 0.35f), UiArt.RoundRectOutline);
+            rim.type = Image.Type.Sliced;
+            UiKit.Stretch(rim.rectTransform);
+
+            var fillArea = UiKit.Rect(area, "FillArea");
+            fillArea.anchorMin = new Vector2(0f, 0.5f); fillArea.anchorMax = new Vector2(1f, 0.5f);
+            fillArea.sizeDelta = new Vector2(0f, 8f);
+            var fill = UiKit.Image(fillArea, "Fill", new Color(0.86f, 0.64f, 0.30f, 0.95f), UiArt.RoundRectFill);
+            fill.type = Image.Type.Sliced;
+            fill.rectTransform.sizeDelta = Vector2.zero;
+            r.Fill = fill;
+
+            // 기본값 눈금
+            if (r.Mark != int.MinValue)
+            {
+                float k = Mathf.InverseLerp(r.Min, r.Max, r.Mark);
+                var tick = UiKit.Image(area, "Mark", new Color(1f, 1f, 1f, 0.45f), null);
+                var kr = tick.rectTransform;
+                kr.anchorMin = kr.anchorMax = new Vector2(k, 0.5f);
+                kr.sizeDelta = new Vector2(2f, 16f);
+            }
+
+            var handleArea = UiKit.Rect(area, "HandleArea");   // 높이 0인 가운데 줄 — 손잡이가 늘어나지 않고 동그랗게
+            handleArea.anchorMin = new Vector2(0f, 0.5f); handleArea.anchorMax = new Vector2(1f, 0.5f);
+            handleArea.sizeDelta = Vector2.zero;
+            var knob = UiKit.Image(handleArea, "Knob", new Color(1f, 0.9f, 0.62f), UiKit.Circle, true);
+            knob.rectTransform.sizeDelta = new Vector2(18f, 18f);
+            var ring = UiKit.Image(knob.rectTransform, "Ring", new Color(0.1f, 0.08f, 0.05f, 0.9f), UiKit.Ring);
+            UiKit.Stretch(ring.rectTransform);
+            r.Knob = knob;
+
+            var sl = area.gameObject.AddComponent<Slider>();
+            sl.transition = Selectable.Transition.None;
+            sl.navigation = new Navigation { mode = Navigation.Mode.None };   // 키 조작은 Update가 — uGUI 내비게이션과 겹치지 않게
+            sl.fillRect = fill.rectTransform;
+            sl.handleRect = knob.rectTransform;
+            sl.targetGraphic = knob;
+            sl.direction = Slider.Direction.LeftToRight;
+            sl.minValue = r.Min; sl.maxValue = r.Max; sl.wholeNumbers = true;
+            sl.SetValueWithoutNotify(r.Get());
+            sl.onValueChanged.AddListener(v =>
+            {
+                if (_rebinding) return;
+                _focus = idx;
+                r.Set(Mathf.RoundToInt(v));
+                Refresh();
+            });
+            r.Slider = sl;
         }
 
         void ArrowButton(RectTransform parent, string glyph, Vector2 anchor, Vector2 pos, Action onClick)
@@ -360,7 +449,15 @@ namespace Proto.UI
                 r.ValueText.text = r.Value();
                 r.ValueText.color = on ? Color.white : new Color(1f, 1f, 1f, 0.35f);
                 if (r.Arrows != null) r.Arrows.SetActive(on);
+                if (r.Slider != null)
+                {
+                    r.Slider.SetValueWithoutNotify(r.Get());
+                    r.Knob.rectTransform.sizeDelta = focus ? new Vector2(22f, 22f) : new Vector2(18f, 18f);
+                    r.Knob.color = focus ? new Color(1f, 0.92f, 0.66f) : new Color(0.9f, 0.82f, 0.62f);
+                    r.Fill.color = focus ? new Color(0.95f, 0.72f, 0.34f, 1f) : new Color(0.86f, 0.64f, 0.30f, 0.8f);
+                }
             }
+            _desc.text = _focus >= 0 && _focus < _rows.Count ? _rows[_focus].Desc ?? "" : "";
             string nav = InputGlyphs.Of(Act.Navigate), ok = InputGlyphs.Of(Act.Interact), back = InputGlyphs.Of(Act.Cancel);
             string tabs = InputGlyphs.Of(Act.PagePrev) + " / " + InputGlyphs.Of(Act.PageNext);
             _hint.text = _rebinding ? "바꿀 키를 누르세요  ·  Esc 취소" : $"{nav} 고르기 · 바꾸기   {tabs} 탭   {ok} 결정   {back} 닫기";
@@ -416,6 +513,7 @@ namespace Proto.UI
             if (page != 0) { ShowTab(_tab + page); return; }
 
             var d = GameInput.Navigate();
+            HoldRepeat(d.x);
             if (d.y != 0)
             {
                 _focus = Mathf.Clamp(_focus - d.y, -1, _rows.Count);
@@ -433,6 +531,21 @@ namespace Proto.UI
                 else if (OnBottom) (_bottom == 0 ? _reset : _close).onClick.Invoke();
                 else DoActivate(_focus);
             }
+        }
+
+        /// <summary>슬라이더 줄에서 ←→를 1초 넘게 누르고 있으면 더 빠르게 (Navigate의 기본 반복 0.11초 위에 얹는다).</summary>
+        void HoldRepeat(int pressedX)
+        {
+            bool slider = _focus >= 0 && _focus < _rows.Count && _rows[_focus].IsSlider;
+            float x = GameInput.MoveValue.x;
+            int held = Mathf.Abs(x) > 0.5f ? (x > 0f ? 1 : -1) : 0;
+            if (!slider || held == 0) { _holdT = 0f; _repeatT = 0f; return; }
+            _holdT += Time.unscaledDeltaTime;
+            if (_holdT < 1.0f || pressedX != 0) return;
+            _repeatT -= Time.unscaledDeltaTime;
+            if (_repeatT > 0f) return;
+            _repeatT = 0.04f;
+            DoStep(_focus, held);
         }
 
         /// <summary>키보드 초점 표시 — 탭 줄이면 지금 탭, 아래 줄이면 고른 버튼에 금색 테.</summary>
