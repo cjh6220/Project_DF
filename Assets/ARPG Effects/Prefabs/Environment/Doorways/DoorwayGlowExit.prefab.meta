@@ -1,0 +1,15 @@
+fileFormatVersion: 2
+guid: ead79c4e7c7b4ee488cb1958d38bbeaf
+timeCreated: 1432646362
+licenseType: Store
+NativeFormatImporter:
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 38222
+  packageName: Action RPG FX
+  packageVersion: 2.02
+  assetPath: Assets/ARPG Effects/Prefabs/Environment/Doorways/DoorwayGlowExit.prefab
+  uploadId: 689779

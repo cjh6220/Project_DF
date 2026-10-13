@@ -1,0 +1,15 @@
+fileFormatVersion: 2
+guid: bdff5c76d21f1884f8cd6291084b1fc8
+timeCreated: 1503161653
+licenseType: Store
+NativeFormatImporter:
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 38222
+  packageName: Action RPG FX
+  packageVersion: 2.02
+  assetPath: Assets/ARPG Effects/Materials/Quest Markers/questmarker_yellow.mat
+  uploadId: 689779

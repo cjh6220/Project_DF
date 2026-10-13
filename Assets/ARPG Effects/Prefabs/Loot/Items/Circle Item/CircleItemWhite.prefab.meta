@@ -1,0 +1,15 @@
+fileFormatVersion: 2
+guid: 2e79a933f03d40949bd2cc020e1d6642
+timeCreated: 1503018130
+licenseType: Store
+NativeFormatImporter:
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 38222
+  packageName: Action RPG FX
+  packageVersion: 2.02
+  assetPath: Assets/ARPG Effects/Prefabs/Loot/Items/Circle Item/CircleItemWhite.prefab
+  uploadId: 689779

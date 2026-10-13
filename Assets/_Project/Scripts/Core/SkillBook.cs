@@ -41,10 +41,10 @@ namespace Proto.Core
             new SkillDef { Name = "연속 찌르기", Cmd = "→→ X",  Role = "경직 고정",       Icon = "skill_rapid_thrusts",  Tier = 1, LearnCost = 2, PerLevel = "타수 +1",              Mastery = "마지막 타 넉백 ×3" },
             new SkillDef { Name = "검기 날리기", Cmd = "←→ Z",  Role = "원거리 · 관통",   Icon = "skill_sword_wave",     Tier = 2, LearnCost = 4, PerLevel = "피해 +15% · 사거리 +1m", Mastery = "검기가 둘로 갈라진다" },
             new SkillDef { Name = "발도술",     Cmd = "↓→ Z",  Role = "보스 딜 · 단일",  Icon = "skill_iaido",          Tier = 2, LearnCost = 4, PerLevel = "피해 +15%",            Mastery = "누르고 있으면 기를 모은다 (최대 ×1.5)" },
-            new SkillDef { Name = "반격 자세",   Cmd = "← X",   Role = "되받아치기",      Icon = "skill_counter_stance", Tier = 2, LearnCost = 4, PerLevel = "자세 시간 +0.05초",     Mastery = "반격 성공 시 재사용 초기화" },
-            new SkillDef { Name = "전투 함성",   Cmd = "↑↓ Z",  Role = "버프",            Icon = "skill_war_cry",        Tier = 2, LearnCost = 4, PerLevel = "지속 +2초",            Mastery = "외칠 때 주변 적 경직" },
-            new SkillDef { Name = "질주",       Cmd = "←← X",  Role = "탐험 · 피로도",   Icon = "skill_sprint",         Tier = -1, LearnCost = 3, PerLevel = "지속 +0.5초",          Mastery = "질주 중 새 방 진입 비용 -50%" },
-            new SkillDef { Name = "대지 가르기", Cmd = "↓→↑ Z", Role = "궁극기",          Icon = "skill_earth_splitter", Tier = 3, LearnCost = 8, CostPerLevel = 2, PerLevel = "피해 +20%", Mastery = "균열이 3초간 남아 지속 피해" },
+            new SkillDef { Name = "반격 자세",   Cmd = "↓↑ X",  Role = "되받아치기",      Icon = "skill_counter_stance", Tier = 2, LearnCost = 4, PerLevel = "자세 시간 +0.05초",     Mastery = "반격 성공 시 재사용 초기화" },
+            new SkillDef { Name = "질풍참",     Cmd = "→→ Z",  Role = "돌파 · 연속 베기", Icon = "skill_gale_slash",     Tier = 1, LearnCost = 2, PerLevel = "피해 +15%",            Mastery = "마지막 베기가 적을 띄운다" },
+            new SkillDef { Name = "낙화참",     Cmd = "→↑ Z",  Role = "도약 · 광역 내려베기", Icon = "skill_falling_blossom", Tier = 2, LearnCost = 4, PerLevel = "피해 +15% · 범위 +10%", Mastery = "내려벤 자리에 충격파" },
+            new SkillDef { Name = "대지 가르기", Cmd = "↑↓ Z",  Role = "궁극기",          Icon = "skill_earth_splitter", Tier = 3, LearnCost = 8, CostPerLevel = 2, PerLevel = "피해 +20%", Mastery = "균열이 3초간 남아 지속 피해" },
         };
 
         readonly int[] _levels = new int[All.Length];

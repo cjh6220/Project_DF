@@ -1,0 +1,15 @@
+fileFormatVersion: 2
+guid: f470fdfb27233884a81c3eeb85b0d7f8
+timeCreated: 1503014254
+licenseType: Store
+NativeFormatImporter:
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 38222
+  packageName: Action RPG FX
+  packageVersion: 2.02
+  assetPath: Assets/ARPG Effects/Prefabs/Interactive/Icons/3D Vertical/VerticalIconStar3D.prefab
+  uploadId: 689779

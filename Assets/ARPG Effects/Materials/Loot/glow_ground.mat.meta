@@ -1,0 +1,15 @@
+fileFormatVersion: 2
+guid: c878deb0fd9279d409d73ef92bfd57a1
+timeCreated: 1502802152
+licenseType: Store
+NativeFormatImporter:
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 38222
+  packageName: Action RPG FX
+  packageVersion: 2.02
+  assetPath: Assets/ARPG Effects/Materials/Loot/glow_ground.mat
+  uploadId: 689779

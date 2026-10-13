@@ -1,0 +1,14 @@
+fileFormatVersion: 2
+guid: 31be2631dd55d984f8f570a537ed6b12
+PrefabImporter:
+  externalObjects: {}
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 38222
+  packageName: Action RPG FX
+  packageVersion: 2.02
+  assetPath: Assets/ARPG Effects/Prefabs/Interactive/Actions/ItemPickup2.prefab
+  uploadId: 689779

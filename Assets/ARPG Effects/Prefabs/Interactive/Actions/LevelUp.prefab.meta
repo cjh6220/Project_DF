@@ -1,0 +1,15 @@
+fileFormatVersion: 2
+guid: 3eb967bebaa6eb94ba9b9730e57ba98d
+timeCreated: 1432661827
+licenseType: Store
+NativeFormatImporter:
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 38222
+  packageName: Action RPG FX
+  packageVersion: 2.02
+  assetPath: Assets/ARPG Effects/Prefabs/Interactive/Actions/LevelUp.prefab
+  uploadId: 689779

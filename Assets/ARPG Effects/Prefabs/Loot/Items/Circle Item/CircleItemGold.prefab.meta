@@ -1,0 +1,15 @@
+fileFormatVersion: 2
+guid: 273f47c052ee7f349986828646f217e7
+timeCreated: 1503018013
+licenseType: Store
+NativeFormatImporter:
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 38222
+  packageName: Action RPG FX
+  packageVersion: 2.02
+  assetPath: Assets/ARPG Effects/Prefabs/Loot/Items/Circle Item/CircleItemGold.prefab
+  uploadId: 689779

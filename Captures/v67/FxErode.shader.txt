@@ -1,0 +1,125 @@
+// 스킬 이펙트용 파티클 셰이더 (URP · Unlit)
+//
+//   모양     _MainTex (R) — 메시 UV로 찍는 모양 그림. U = 호를 따라(0 꼬리 → 1 머리), V = 폭(0 안쪽 → 1 바깥)
+//   부서짐   _NoiseTex (R) — 흐르는 노이즈. 모양 × 노이즈가 Erode보다 작은 곳은 지운다 (가장자리부터 갉아먹듯)
+//   경계     지워지는 경계 근처는 _EdgeColor로 빛난다
+//   흐름     _MainPan / _NoisePan.xy — 시간에 따라 UV를 흘린다 (회오리는 메시를 돌리지 않고 UV만 흘린다)
+//   끝 흐림  _Fade.xy — U · V 끝을 부드럽게 (0이면 안 흐림)
+//
+// 정점 색 — 메시 파티클에선 Color 스트림이 어둡게 들어와(실측) 기본은 안 쓴다 (_VColor = 0). 색 · 투명도는 재질에서 정한다
+//
+// 파티클 렌더러의 Custom Vertex Streams: Position · Color · UV · Custom1.xy
+//   Custom1.x → Erode (0 = 다 보임, 1 = 다 지워짐) — Custom Data 곡선으로 수명 동안 움직인다
+//   Custom1.y → 쓸기 (모양 U에 더한다 — -1 → 0으로 움직이면 머리가 호를 따라 쓸고 지나간다)
+Shader "Proto/FxErode"
+{
+    Properties
+    {
+        _MainTex ("Shape (R)", 2D) = "white" {}
+        _NoiseTex ("Noise (R)", 2D) = "gray" {}
+        [HDR] _Color ("Color", Color) = (1, 1, 1, 1)
+        [HDR] _EdgeColor ("Edge Color", Color) = (1, 1, 1, 1)
+        _MainPan ("Shape Pan (xy)", Vector) = (0, 0, 0, 0)
+        _NoisePan ("Noise Pan (xy) · Tiling (zw)", Vector) = (0.6, 0, 2, 1)
+        _NoiseAmount ("Noise Amount", Range(0, 1)) = 0.6
+        _Soft ("Erode Softness", Range(0.01, 1)) = 0.12
+        _EdgeWidth ("Edge Width", Range(0, 0.5)) = 0.08
+        _Fade ("End Fade (U, V)", Vector) = (0.1, 0.1, 0, 0)
+        [Toggle] _Clip ("Clip Outside Shape", Float) = 0
+        _VColor ("Use Vertex Color", Range(0, 1)) = 0
+        [Enum(UnityEngine.Rendering.BlendMode)] _SrcBlend ("Src Blend", Float) = 5
+        [Enum(UnityEngine.Rendering.BlendMode)] _DstBlend ("Dst Blend", Float) = 1
+    }
+
+    SubShader
+    {
+        Tags { "RenderType" = "Transparent" "Queue" = "Transparent" "RenderPipeline" = "UniversalPipeline" "IgnoreProjector" = "True" "PreviewType" = "Plane" }
+
+        Pass
+        {
+            Name "Unlit"
+            Blend [_SrcBlend] [_DstBlend]
+            ZWrite Off
+            Cull Off
+
+            HLSLPROGRAM
+            #pragma vertex vert
+            #pragma fragment frag
+            #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
+
+            struct Attributes
+            {
+                float4 positionOS : POSITION;
+                half4 color : COLOR;
+                float4 uv : TEXCOORD0;      // xy = UV · z = Custom1.x (Erode) · w = Custom1.y (쓸기)
+            };
+
+            struct Varyings
+            {
+                float4 positionCS : SV_POSITION;
+                half4 color : COLOR;
+                float4 uv : TEXCOORD0;
+            };
+
+            TEXTURE2D(_MainTex);  SAMPLER(sampler_MainTex);
+            TEXTURE2D(_NoiseTex); SAMPLER(sampler_NoiseTex);
+
+            CBUFFER_START(UnityPerMaterial)
+                float4 _MainTex_ST;
+                float4 _NoiseTex_ST;
+                half4 _Color;
+                half4 _EdgeColor;
+                float4 _MainPan;
+                float4 _NoisePan;
+                half _NoiseAmount;
+                half _Soft;
+                half _EdgeWidth;
+                float4 _Fade;
+                half _Clip;
+                half _VColor;
+            CBUFFER_END
+
+            Varyings vert (Attributes i)
+            {
+                Varyings o;
+                o.positionCS = TransformObjectToHClip(i.positionOS.xyz);
+                o.color = i.color;
+                o.uv = i.uv;
+                return o;
+            }
+
+            half EdgeFade (float t, float w)
+            {
+                return w > 0.0001 ? saturate(t / w) * saturate((1.0 - t) / w) : 1.0;
+            }
+
+            half4 frag (Varyings i) : SV_Target
+            {
+                float2 uv = i.uv.xy;
+                float erode = i.uv.z;
+                float sweep = i.uv.w;
+
+                float2 suv = uv * _MainTex_ST.xy + _MainTex_ST.zw + _MainPan.xy * _Time.y + float2(sweep, 0);
+                half shape = SAMPLE_TEXTURE2D(_MainTex, sampler_MainTex, suv).r;
+                // 쓸기로 모양 밖(U < 0 · U > 1)으로 밀려난 곳은 비운다 — 머리가 호를 따라 들어왔다 나간다
+                if (_Clip > 0.5) shape *= step(0.0, suv.x) * step(suv.x, 1.0);
+
+                float2 nuv = uv * _NoisePan.zw + _NoisePan.xy * _Time.y + float2(sweep * 0.5, 0);
+                half n = SAMPLE_TEXTURE2D(_NoiseTex, sampler_NoiseTex, nuv).r;
+
+                shape *= EdgeFade(uv.x, _Fade.x) * EdgeFade(uv.y, _Fade.y);
+
+                // 모양에 노이즈를 섞은 값 — 이게 erode보다 크면 보인다
+                half v = shape * lerp(1.0, n * 1.6, _NoiseAmount);
+                half a = smoothstep(erode, erode + _Soft, v);
+                // 지워지는 경계 — erode 바로 위 띠
+                half edge = a * (1.0 - smoothstep(erode + _EdgeWidth, erode + _EdgeWidth + _Soft, v));
+
+                half3 col = lerp(_Color.rgb, _EdgeColor.rgb, saturate(edge)) * lerp(half3(1, 1, 1), i.color.rgb, _VColor);
+                a *= lerp(1.0, i.color.a, _VColor) * _Color.a;
+                return half4(col, saturate(a));
+            }
+            ENDHLSL
+        }
+    }
+}

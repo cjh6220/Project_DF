@@ -1,0 +1,15 @@
+fileFormatVersion: 2
+guid: f327ec18aef78204f910550ffbc71565
+timeCreated: 1502816542
+licenseType: Store
+NativeFormatImporter:
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 38222
+  packageName: Action RPG FX
+  packageVersion: 2.02
+  assetPath: Assets/ARPG Effects/Materials/Loot/beam_essence_dark.mat
+  uploadId: 689779

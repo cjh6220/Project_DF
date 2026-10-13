@@ -1,0 +1,15 @@
+fileFormatVersion: 2
+guid: c4f07516fde33f546bb2fc0a60d80378
+timeCreated: 1432497777
+licenseType: Store
+NativeFormatImporter:
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 38222
+  packageName: Action RPG FX
+  packageVersion: 2.02
+  assetPath: Assets/ARPG Effects/Prefabs/Loot/Gems/ItemGemBlue.prefab
+  uploadId: 689779

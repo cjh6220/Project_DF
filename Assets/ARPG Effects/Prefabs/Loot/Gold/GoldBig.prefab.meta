@@ -1,0 +1,15 @@
+fileFormatVersion: 2
+guid: 8bbe49e1ae80808419ad057ff627013f
+timeCreated: 1432135588
+licenseType: Store
+NativeFormatImporter:
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 38222
+  packageName: Action RPG FX
+  packageVersion: 2.02
+  assetPath: Assets/ARPG Effects/Prefabs/Loot/Gold/GoldBig.prefab
+  uploadId: 689779

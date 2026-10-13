@@ -1,0 +1,15 @@
+fileFormatVersion: 2
+guid: ea9232feb89187f40b92d71226a7987d
+timeCreated: 1503014393
+licenseType: Store
+NativeFormatImporter:
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 38222
+  packageName: Action RPG FX
+  packageVersion: 2.02
+  assetPath: Assets/ARPG Effects/Prefabs/Interactive/Icons/3D Vertical/VerticalIconExclamationMark3D.prefab
+  uploadId: 689779

@@ -1,0 +1,15 @@
+fileFormatVersion: 2
+guid: ccb3e311f4a463d48882902db30e02ec
+timeCreated: 1432999410
+licenseType: Store
+NativeFormatImporter:
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 38222
+  packageName: Action RPG FX
+  packageVersion: 2.02
+  assetPath: Assets/ARPG Effects/Prefabs/Interactive/Portals/Red/PortalRedOpen.prefab
+  uploadId: 689779

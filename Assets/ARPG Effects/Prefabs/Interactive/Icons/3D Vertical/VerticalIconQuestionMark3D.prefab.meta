@@ -1,0 +1,15 @@
+fileFormatVersion: 2
+guid: c23a1f763da029d4c8f826d50a08e008
+timeCreated: 1503014327
+licenseType: Store
+NativeFormatImporter:
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 38222
+  packageName: Action RPG FX
+  packageVersion: 2.02
+  assetPath: Assets/ARPG Effects/Prefabs/Interactive/Icons/3D Vertical/VerticalIconQuestionMark3D.prefab
+  uploadId: 689779

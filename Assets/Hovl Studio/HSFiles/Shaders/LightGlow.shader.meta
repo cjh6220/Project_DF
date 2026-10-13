@@ -1,0 +1,16 @@
+fileFormatVersion: 2
+guid: 68f568f887edc9d449e3a18dafbe5027
+ShaderImporter:
+  externalObjects: {}
+  defaultTextures: []
+  nonModifiableTextures: []
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 133012
+  packageName: AOE Magic spells Vol.1
+  packageVersion: 3.0
+  assetPath: Assets/Hovl Studio/HSFiles/Shaders/LightGlow.shader
+  uploadId: 865246

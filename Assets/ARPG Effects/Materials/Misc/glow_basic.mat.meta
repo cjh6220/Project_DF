@@ -1,0 +1,15 @@
+fileFormatVersion: 2
+guid: dbd6c303c72318d45b8cc033760bc214
+timeCreated: 1502802152
+licenseType: Store
+NativeFormatImporter:
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 38222
+  packageName: Action RPG FX
+  packageVersion: 2.02
+  assetPath: Assets/ARPG Effects/Materials/Misc/glow_basic.mat
+  uploadId: 689779

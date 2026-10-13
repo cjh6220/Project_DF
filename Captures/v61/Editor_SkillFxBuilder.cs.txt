@@ -1,0 +1,654 @@
+#if UNITY_EDITOR
+using System.Collections.Generic;
+using UnityEditor;
+using UnityEngine;
+using UnityEngine.Rendering;
+
+namespace Proto.EditorTools
+{
+    /// <summary>
+    /// 스킬 이펙트 — 메시 파티클 + 부서지는(Erode) 셰이더. 메뉴: Proto ▸ Build Skill FX
+    ///
+    /// 만드는 방식 (게임 VFX에서 흔히 쓰는 방식)
+    ///   · 납작한 그림 대신 메시를 띄운다 — 호(베기), 꼬인 원통(회오리), 창(찌르기). 파티클 렌더 모드 = Mesh
+    ///   · 셰이더 Proto/FxErode — 모양 그림 × 흐르는 노이즈. 사라질 땐 노이즈대로 갉아먹고, 경계는 밝게
+    ///   · 파티클 Custom Data(Custom1.xy)를 셰이더로 넘긴다 — x = 부서짐, y = 쓸기(베기 머리가 호를 따라 지나감)
+    ///   · 층을 겹친다 — 밝은 심 · 바깥 빛 · 불티 · 흙먼지. 터질 땐 짧고 세게, 사라질 땐 천천히
+    ///
+    /// 만드는 것 (전부 Assets/_Project/Resources/Fx/Skill/)
+    ///   Gen/       노이즈 · 모양 그림(png), 메시(asset) — 코드로 그린다
+    ///   Mat_E*     FxErode 재질
+    ///   PS_Thrust  Spear(빛창) · SpearGlow(바깥 빛) · Lines(속도선) · Tip/Flash · Tip/Ring · Tip/Sparks
+    ///   PS_Whirl   Vortex · VortexInner(꼬인 원통 회오리) · Slashes(몸 둘레를 쓸고 지나가는 칼날 호) · GroundWind · Dust
+    ///   PS_Crescent Blade(지나간 자리에 남는 초승달) · Core(날 끝) · Wisps(빛 가루)
+    ///
+    /// 프리팹은 인스펙터에서 직접 고쳐도 된다. 단 이 메뉴를 다시 누르면 처음 값으로 덮어쓴다.
+    /// </summary>
+    public static class SkillFxBuilder
+    {
+        const string TexDir = "Assets/Texture/Effect/";
+        const string Dir = "Assets/_Project/Resources/Fx/Skill/";
+        const string Gen = Dir + "Gen/";
+
+        static Texture2D _noise, _maskSlash, _maskCrescent, _maskSpear, _maskBand;
+        static Mesh _arc, _tube, _spear;
+
+        [MenuItem("Proto/Build Skill FX")]
+        public static void Build()
+        {
+            System.IO.Directory.CreateDirectory(Dir);
+            System.IO.Directory.CreateDirectory(Gen);
+
+            // 예전 그림 재질 — 고리 · 흙먼지만 아직 쓴다
+            OldMat("Mat_FxThrustRing", "FxThrustRing", true, 2.2f);
+            OldMat("Mat_FxDustPuff_Alpha", "FxDustPuff", false, 1f);
+
+            Textures();
+            Meshes();
+            Materials();
+            AssetDatabase.SaveAssets();
+
+            Thrust();
+            Whirl();
+            Crescent();
+            AssetDatabase.SaveAssets();
+            Debug.Log("[Proto] 스킬 이펙트(메시 파티클 · FxErode) 생성 완료");
+        }
+
+        // ───────────────────────────── 그림 (코드로 그린다) ─────────────────────────────
+
+        static void Textures()
+        {
+            _noise = SaveTex("FxNoise", 128, 128, true, Noise);
+            _maskSlash = SaveTex("FxMaskSlash", 256, 64, false, MaskSlash);
+            _maskCrescent = SaveTex("FxMaskCrescent", 256, 64, false, MaskCrescent);
+            _maskSpear = SaveTex("FxMaskSpear", 256, 64, false, MaskSpear);
+            _maskBand = SaveTex("FxMaskBand", 64, 64, true, MaskBand);
+        }
+
+        delegate float Pixel(float u, float v);
+
+        static Texture2D SaveTex(string name, int w, int h, bool repeat, Pixel f)
+        {
+            var t = new Texture2D(w, h, TextureFormat.RGBA32, false, true);
+            var px = new Color32[w * h];
+            for (int y = 0; y < h; y++)
+                for (int x = 0; x < w; x++)
+                {
+                    byte b = (byte)Mathf.RoundToInt(Mathf.Clamp01(f((x + 0.5f) / w, (y + 0.5f) / h)) * 255f);
+                    px[y * w + x] = new Color32(b, b, b, 255);
+                }
+            t.SetPixels32(px);
+            string path = Gen + name + ".png";
+            System.IO.File.WriteAllBytes(path, t.EncodeToPNG());
+            Object.DestroyImmediate(t);
+            AssetDatabase.ImportAsset(path, ImportAssetOptions.ForceUpdate);
+            var imp = (TextureImporter)AssetImporter.GetAtPath(path);
+            imp.textureType = TextureImporterType.Default;
+            imp.sRGBTexture = false;
+            imp.alphaSource = TextureImporterAlphaSource.None;
+            imp.wrapMode = repeat ? TextureWrapMode.Repeat : TextureWrapMode.Clamp;
+            imp.mipmapEnabled = true;
+            imp.textureCompression = TextureImporterCompression.Uncompressed;
+            imp.SaveAndReimport();
+            return AssetDatabase.LoadAssetAtPath<Texture2D>(path);
+        }
+
+        // 이음매 없는 값 노이즈 (주기 p 격자) — 4옥타브
+        static float Hash(int x, int y) { unchecked { int n = x * 374761393 + y * 668265263; n = (n ^ (n >> 13)) * 1274126177; return ((n ^ (n >> 16)) & 0xffff) / 65535f; } }
+        static float Lattice(float u, float v, int p)
+        {
+            float x = u * p, y = v * p;
+            int x0 = Mathf.FloorToInt(x), y0 = Mathf.FloorToInt(y);
+            float fx = x - x0, fy = y - y0;
+            fx = fx * fx * (3f - 2f * fx); fy = fy * fy * (3f - 2f * fy);
+            int ax = ((x0 % p) + p) % p, ay = ((y0 % p) + p) % p, bx = (ax + 1) % p, by = (ay + 1) % p;
+            return Mathf.Lerp(Mathf.Lerp(Hash(ax, ay), Hash(bx, ay), fx), Mathf.Lerp(Hash(ax, by), Hash(bx, by), fx), fy);
+        }
+        static float Noise(float u, float v)
+        {
+            float s = Lattice(u, v, 4) * 0.5f + Lattice(u, v, 8) * 0.27f + Lattice(u, v, 16) * 0.15f + Lattice(u, v, 32) * 0.08f;
+            return Mathf.Clamp01((s - 0.2f) / 0.6f);   // 대비를 키운다
+        }
+
+        static float Gauss(float x, float c, float w) { float d = (x - c) / w; return Mathf.Exp(-d * d); }
+        static float Smooth(float a, float b, float x) { float t = Mathf.Clamp01((x - a) / (b - a)); return t * t * (3f - 2f * t); }
+
+        // 베기 호 — U: 0 꼬리 → 1 머리, V: 0 안쪽 → 1 바깥(날). 머리는 굵고 꼬리로 갈수록 가늘고 흐려진다
+        static float MaskSlash(float u, float v)
+        {
+            float thick = Mathf.Lerp(0.12f, 0.85f, Mathf.Pow(u, 0.8f));
+            float body = Smooth(1f - thick, 1f - thick + 0.3f, v) * Smooth(1f, 0.9f, v);
+            float core = Gauss(v, 0.86f, 0.05f + 0.03f * u);
+            float tail = Mathf.Pow(u, 1.4f);
+            float head = Smooth(1f, 0.94f, u);
+            return (body * 0.5f + core) * tail * head;
+        }
+
+        // 초승달 — 양 끝이 뾰족하고 가운데가 굵다
+        static float MaskCrescent(float u, float v)
+        {
+            float s = Mathf.Pow(Mathf.Sin(Mathf.PI * u), 0.8f);
+            float thick = 0.1f + 0.75f * s;
+            float body = Smooth(1f - thick, 1f - thick + 0.3f, v) * Smooth(1f, 0.9f, v);
+            float core = Gauss(v, 0.87f, 0.04f + 0.03f * s);
+            return (body * 0.55f + core) * s;
+        }
+
+        // 창 — U: 0 뒤 → 1 끝, V: 가운데가 심
+        static float MaskSpear(float u, float v)
+        {
+            float along = Mathf.Pow(u, 1.3f) * Smooth(1f, 0.97f, u);
+            float core = Gauss(v, 0.5f, 0.07f);
+            float glow = Gauss(v, 0.5f, 0.24f) * 0.45f;
+            return (core + glow) * along;
+        }
+
+        // 회오리 띠 — U로 이어지는(반복) 무늬, V 가운데가 진하다
+        static float MaskBand(float u, float v)
+        {
+            float prof = Mathf.Pow(Mathf.Sin(Mathf.PI * v), 1.3f);
+            float streak = 0.55f + 0.45f * Lattice(u, v * 0.25f, 8);
+            return prof * streak;
+        }
+
+        // ───────────────────────────── 메시 (코드로 만든다) ─────────────────────────────
+
+        static void Meshes()
+        {
+            _arc = SaveMesh("MeshArc", Arc(200f, 0.55f, 1f, 56, 4));
+            _tube = SaveMesh("MeshTube", Tube(40, 6, 75f, 0.8f, 1.2f));
+            _spear = SaveMesh("MeshSpear", Spear(18));
+        }
+
+        static Mesh SaveMesh(string name, Mesh m)
+        {
+            string path = Gen + name + ".asset";
+            var old = AssetDatabase.LoadAssetAtPath<Mesh>(path);
+            if (old != null)
+            {
+                old.Clear();
+                EditorUtility.CopySerialized(m, old);
+                Object.DestroyImmediate(m);
+                EditorUtility.SetDirty(old);
+                return old;
+            }
+            m.name = name;
+            AssetDatabase.CreateAsset(m, path);
+            return m;
+        }
+
+        /// <summary>XZ 바닥에 놓인 호 — +X를 가운데로 deg만큼 벌어진다. 반경 1 기준(안쪽 r0). U = 각도(0 꼬리 → 1 머리), V = 반경.</summary>
+        static Mesh Arc(float deg, float r0, float r1, int seg, int rings)
+        {
+            var vs = new List<Vector3>(); var uvs = new List<Vector2>(); var tris = new List<int>();
+            float a = deg * Mathf.Deg2Rad;
+            for (int i = 0; i <= seg; i++)
+            {
+                float u = (float)i / seg, th = -a * 0.5f + a * u;
+                for (int j = 0; j <= rings; j++)
+                {
+                    float v = (float)j / rings, r = Mathf.Lerp(r0, r1, v);
+                    vs.Add(new Vector3(Mathf.Cos(th) * r, (v - 0.5f) * -0.12f, Mathf.Sin(th) * r));   // 바깥이 살짝 내려간 접시 모양
+                    uvs.Add(new Vector2(u, v));
+                }
+            }
+            Grid(tris, seg, rings, 0);
+            return Make(vs, uvs, tris);
+        }
+
+        /// <summary>꼬인 원통 — 높이 0~1, 아래 반경 rb · 위 반경 rt, 위로 갈수록 twist도만큼 비튼다. U = 둘레, V = 높이.</summary>
+        static Mesh Tube(int seg, int rings, float twist, float rb, float rt)
+        {
+            var vs = new List<Vector3>(); var uvs = new List<Vector2>(); var tris = new List<int>();
+            for (int i = 0; i <= seg; i++)
+            {
+                float u = (float)i / seg;
+                for (int j = 0; j <= rings; j++)
+                {
+                    float v = (float)j / rings;
+                    float th = u * Mathf.PI * 2f + v * twist * Mathf.Deg2Rad;
+                    float r = Mathf.Lerp(rb, rt, v * v);
+                    vs.Add(new Vector3(Mathf.Cos(th) * r, v, Mathf.Sin(th) * r));
+                    uvs.Add(new Vector2(u, v));
+                }
+            }
+            Grid(tris, seg, rings, 0);
+            return Make(vs, uvs, tris);
+        }
+
+        /// <summary>창 — +Z로 길이 1. 엇갈린 두 판(가로 · 세로)이라 어느 쪽에서 봐도 보인다. 뒤는 가늘고 0.8에서 가장 굵고 끝은 뾰족.</summary>
+        static Mesh Spear(int seg)
+        {
+            var vs = new List<Vector3>(); var uvs = new List<Vector2>(); var tris = new List<int>();
+            for (int plane = 0; plane < 2; plane++)
+            {
+                int start = vs.Count;
+                for (int i = 0; i <= seg; i++)
+                {
+                    float u = (float)i / seg;
+                    float w = u < 0.8f ? Mathf.Lerp(0.2f, 1f, u / 0.8f) : Mathf.Lerp(1f, 0.02f, (u - 0.8f) / 0.2f);
+                    w *= 0.5f;
+                    for (int j = 0; j <= 1; j++)
+                    {
+                        float s = j == 0 ? -w : w;
+                        vs.Add(plane == 0 ? new Vector3(s, 0f, u) : new Vector3(0f, s, u));
+                        uvs.Add(new Vector2(u, j));
+                    }
+                }
+                Grid(tris, seg, 1, start);
+            }
+            return Make(vs, uvs, tris);
+        }
+
+        static void Grid(List<int> tris, int nu, int nv, int start)
+        {
+            int row = nv + 1;
+            for (int i = 0; i < nu; i++)
+                for (int j = 0; j < nv; j++)
+                {
+                    int a = start + i * row + j, b = a + row;
+                    tris.Add(a); tris.Add(a + 1); tris.Add(b);
+                    tris.Add(b); tris.Add(a + 1); tris.Add(b + 1);
+                }
+        }
+
+        static Mesh Make(List<Vector3> vs, List<Vector2> uvs, List<int> tris)
+        {
+            var m = new Mesh();
+            m.SetVertices(vs); m.SetUVs(0, uvs); m.SetTriangles(tris, 0);
+            var cols = new Color[vs.Count]; for (int i = 0; i < cols.Length; i++) cols[i] = Color.white;
+            m.colors = cols;
+            m.RecalculateNormals(); m.RecalculateBounds();
+            return m;
+        }
+
+        // ───────────────────────────── 재질 ─────────────────────────────
+
+        static Material Load(string name) => AssetDatabase.LoadAssetAtPath<Material>(Dir + name + ".mat");
+
+        static void Materials()
+        {
+            // 베기 호 — 희푸른 칼빛, 경계는 거의 흰빛
+            EMat("Mat_ESlash", _maskSlash, new Color(0.9f, 1.25f, 2.2f), new Color(3.2f, 3.4f, 4f),
+                 Vector4.zero, new Vector4(-1.2f, 0f, 1.5f, 3f), 0.55f, 0.1f, 0.07f, new Vector2(0f, 0.04f), true, true);
+            // 바닥 바람 자국 — 흙빛, 알파 혼합
+            EMat("Mat_EGround", _maskSlash, new Color(0.62f, 0.56f, 0.46f, 0.55f), new Color(0.85f, 0.8f, 0.7f, 0.7f),
+                 Vector4.zero, new Vector4(-0.8f, 0f, 1.2f, 2f), 0.75f, 0.2f, 0.06f, new Vector2(0f, 0.05f), true, false);
+            // 회오리 — 바깥은 느리게 · 안은 빠르게 흐른다
+            EMat("Mat_EVortex", _maskBand, new Color(0.6f, 0.7f, 0.95f, 0.28f), new Color(1.6f, 1.8f, 2.2f, 0.8f),
+                 new Vector4(-1.1f, 0f, 0f, 0f), new Vector4(-0.7f, 0.15f, 3f, 1f), 0.9f, 0.18f, 0.06f, new Vector2(0f, 0.12f), false, true);
+            EMat("Mat_EVortexInner", _maskBand, new Color(0.85f, 0.95f, 1.2f, 0.32f), new Color(2.2f, 2.4f, 2.8f, 0.9f),
+                 new Vector4(-2.2f, 0f, 0f, 0f), new Vector4(-1.6f, 0.3f, 4f, 1f), 0.9f, 0.14f, 0.05f, new Vector2(0f, 0.15f), false, true);
+            // 찌르기 창 — 심은 희고 바깥은 푸르게
+            EMat("Mat_ESpear", _maskSpear, new Color(1.6f, 2f, 3f), new Color(3.5f, 3.6f, 4f),
+                 Vector4.zero, new Vector4(-5f, 0f, 2f, 1f), 0.45f, 0.08f, 0.06f, new Vector2(0f, 0f), true, true);
+            EMat("Mat_ESpearGlow", _maskSpear, new Color(0.35f, 0.6f, 1.6f, 0.45f), new Color(1.2f, 1.6f, 2.6f, 0.6f),
+                 Vector4.zero, new Vector4(-3f, 0f, 1.5f, 1f), 0.6f, 0.15f, 0.05f, new Vector2(0f, 0f), true, true);
+            // 검기 초승달
+            EMat("Mat_ECrescent", _maskCrescent, new Color(0.85f, 1.2f, 2.2f), new Color(3f, 3.3f, 4f),
+                 Vector4.zero, new Vector4(-3f, 0f, 1.5f, 2f), 0.6f, 0.1f, 0.07f, new Vector2(0f, 0.03f), false, true);
+            AssetDatabase.SaveAssets();
+        }
+
+        static void EMat(string name, Texture2D shape, Color col, Color edge, Vector4 mainPan, Vector4 noisePan,
+                         float noiseAmt, float soft, float edgeW, Vector2 fade, bool clip, bool additive)
+        {
+            var sh = Shader.Find("Proto/FxErode");
+            if (sh == null) { Debug.LogError("[Proto] Proto/FxErode 셰이더 없음"); return; }
+            string path = Dir + name + ".mat";
+            var m = AssetDatabase.LoadAssetAtPath<Material>(path);
+            if (m == null) { m = new Material(sh); AssetDatabase.CreateAsset(m, path); }
+            m.shader = sh;
+            m.SetTexture("_MainTex", shape);
+            m.SetTexture("_NoiseTex", _noise);
+            m.SetColor("_Color", col);
+            m.SetColor("_EdgeColor", edge);
+            m.SetVector("_MainPan", mainPan);
+            m.SetVector("_NoisePan", noisePan);
+            m.SetFloat("_NoiseAmount", noiseAmt);
+            m.SetFloat("_Soft", soft);
+            m.SetFloat("_EdgeWidth", edgeW);
+            m.SetVector("_Fade", new Vector4(fade.x, fade.y, 0f, 0f));
+            m.SetFloat("_Clip", clip ? 1f : 0f);
+            m.SetFloat("_SrcBlend", (float)BlendMode.SrcAlpha);
+            m.SetFloat("_DstBlend", (float)(additive ? BlendMode.One : BlendMode.OneMinusSrcAlpha));
+            m.renderQueue = (int)RenderQueue.Transparent + (additive ? 40 : 20);
+            EditorUtility.SetDirty(m);
+        }
+
+        static void OldMat(string matName, string texName, bool additive, float bright)
+        {
+            string texPath = TexDir + texName + ".png";
+            var imp = AssetImporter.GetAtPath(texPath) as TextureImporter;
+            if (imp == null) { Debug.LogWarning("[Proto] 스킬 이펙트 그림 없음: " + texPath); return; }
+            imp.textureType = TextureImporterType.Default;
+            imp.alphaSource = TextureImporterAlphaSource.FromGrayScale;
+            imp.alphaIsTransparency = true;
+            imp.wrapMode = TextureWrapMode.Clamp;
+            imp.mipmapEnabled = true;
+            imp.maxTextureSize = 512;
+            imp.SaveAndReimport();
+            var tex = AssetDatabase.LoadAssetAtPath<Texture2D>(texPath);
+
+            string path = Dir + matName + ".mat";
+            var m = AssetDatabase.LoadAssetAtPath<Material>(path);
+            if (m == null)
+            {
+                m = new Material(Shader.Find("Universal Render Pipeline/Particles/Unlit"));
+                AssetDatabase.CreateAsset(m, path);
+            }
+            m.SetTexture("_BaseMap", tex);
+            m.SetColor("_BaseColor", new Color(bright, bright, bright, 1f));
+            m.SetFloat("_Surface", 1f);
+            m.SetFloat("_Blend", additive ? 2f : 0f);
+            m.SetFloat("_SrcBlend", (float)BlendMode.SrcAlpha);
+            m.SetFloat("_DstBlend", (float)(additive ? BlendMode.One : BlendMode.OneMinusSrcAlpha));
+            m.SetFloat("_ZWrite", 0f);
+            m.SetFloat("_Cull", 0f);
+            m.EnableKeyword("_SURFACE_TYPE_TRANSPARENT");
+            if (!additive) m.EnableKeyword("_ALPHABLEND_ON"); else m.DisableKeyword("_ALPHABLEND_ON");
+            m.renderQueue = (int)RenderQueue.Transparent + 30;
+            m.SetOverrideTag("RenderType", "Transparent");
+            EditorUtility.SetDirty(m);
+        }
+
+        // ───────────────────────────── 공통 ─────────────────────────────
+
+        static ParticleSystem PS(Transform parent, string name, Material mat, Vector3 pos)
+        {
+            var go = new GameObject(name);
+            go.transform.SetParent(parent, false);
+            go.transform.localPosition = pos;
+            var ps = go.AddComponent<ParticleSystem>();
+            ps.Stop(true, ParticleSystemStopBehavior.StopEmittingAndClear);
+            var r = go.GetComponent<ParticleSystemRenderer>();
+            r.sharedMaterial = mat;
+            r.renderMode = ParticleSystemRenderMode.Billboard;
+            r.shadowCastingMode = ShadowCastingMode.Off;
+            r.receiveShadows = false;
+            r.sortMode = ParticleSystemSortMode.YoungestInFront;
+            var main = ps.main;
+            main.playOnAwake = true;
+            main.loop = false;
+            main.duration = 1f;
+            main.scalingMode = ParticleSystemScalingMode.Hierarchy;
+            main.startSpeed = 0f;
+            main.simulationSpace = ParticleSystemSimulationSpace.Local;
+            var em = ps.emission; em.rateOverTime = 0f;
+            var sh = ps.shape; sh.enabled = false;
+            return ps;
+        }
+
+        /// <summary>메시 파티클 — 메시 축이 오브젝트 축을 따른다. 셰이더로 UV · Custom1.xy를 넘긴다.</summary>
+        static ParticleSystem MeshPS(Transform parent, string name, Mesh mesh, Material mat, Vector3 pos)
+        {
+            var ps = PS(parent, name, mat, pos);
+            var r = ps.GetComponent<ParticleSystemRenderer>();
+            r.renderMode = ParticleSystemRenderMode.Mesh;
+            r.mesh = mesh;
+            r.alignment = ParticleSystemRenderSpace.Local;
+            r.enableGPUInstancing = false;
+            r.SetActiveVertexStreams(new List<ParticleSystemVertexStream> {
+                ParticleSystemVertexStream.Position, ParticleSystemVertexStream.Color,
+                ParticleSystemVertexStream.UV, ParticleSystemVertexStream.Custom1XY });
+            var m = ps.main;
+            m.startSize3D = true;
+            m.startRotation3D = true;
+            return ps;
+        }
+
+        /// <summary>Custom1.x = 부서짐 곡선, Custom1.y = 쓸기 곡선 (수명 0~1).</summary>
+        static void Custom(ParticleSystem ps, AnimationCurve erode, AnimationCurve sweep)
+        {
+            var cd = ps.customData; cd.enabled = true;
+            cd.SetMode(ParticleSystemCustomData.Custom1, ParticleSystemCustomDataMode.Vector);
+            cd.SetVectorComponentCount(ParticleSystemCustomData.Custom1, 2);
+            cd.SetVector(ParticleSystemCustomData.Custom1, 0, new ParticleSystem.MinMaxCurve(1f, erode));
+            cd.SetVector(ParticleSystemCustomData.Custom1, 1, sweep != null ? new ParticleSystem.MinMaxCurve(1f, sweep) : new ParticleSystem.MinMaxCurve(0f));
+        }
+
+        static AnimationCurve Curve(params float[] tv)
+        {
+            var c = new AnimationCurve();
+            for (int i = 0; i + 1 < tv.Length; i += 2) c.AddKey(new Keyframe(tv[i], tv[i + 1]));   // 접선 0 — 키마다 부드럽게 멈췄다 간다
+            return c;
+        }
+
+        static void Size3(ParticleSystem ps, float x, float y, float z)
+        {
+            var m = ps.main; m.startSizeX = x; m.startSizeY = y; m.startSizeZ = z;
+        }
+
+        static void Burst(ParticleSystem ps, int count, float at = 0f)
+        {
+            var em = ps.emission;
+            em.SetBursts(new[] { new ParticleSystem.Burst(at, (short)count) });
+        }
+
+        static void Fade(ParticleSystem ps, float inAt, float peak = 1f)
+        {
+            var col = ps.colorOverLifetime; col.enabled = true;
+            var g = new Gradient();
+            g.SetKeys(new[] { new GradientColorKey(Color.white, 0f), new GradientColorKey(Color.white, 1f) },
+                      inAt <= 0f
+                        ? new[] { new GradientAlphaKey(peak, 0f), new GradientAlphaKey(0f, 1f) }
+                        : new[] { new GradientAlphaKey(0f, 0f), new GradientAlphaKey(peak, inAt), new GradientAlphaKey(0f, 1f) });
+            col.color = g;
+        }
+
+        static void SizeCurve(ParticleSystem ps, float from, float to, bool easeOut = true)
+        {
+            var s = ps.sizeOverLifetime; s.enabled = true;
+            var c = easeOut
+                ? new AnimationCurve(new Keyframe(0f, from, 0f, (to - from) * 2f), new Keyframe(1f, to, 0f, 0f))
+                : AnimationCurve.Linear(0f, from, 1f, to);
+            s.size = new ParticleSystem.MinMaxCurve(1f, c);
+        }
+
+        static GameObject Root(string name) => new GameObject(name);
+
+        static void Save(GameObject root, string name)
+        {
+            PrefabUtility.SaveAsPrefabAsset(root, Dir + name + ".prefab");
+            Object.DestroyImmediate(root);
+        }
+
+        static Material Sparkle()
+        {
+            var m = AssetDatabase.LoadAssetAtPath<Material>("Assets/_Project/Resources/Fx/Loot/Mat_Sparkle.mat");
+            return m != null ? m : Load("Mat_FxThrustRing");
+        }
+
+        static float Rad(float deg) => deg * Mathf.Deg2Rad;
+
+        // ───────────────────────────── 찌르기 ─────────────────────────────
+
+        /// <summary>앞(+Z)으로 찌른다. SkillFx가 Spear · SpearGlow 길이(Z 크기)를 찌르는 길이로, Tip을 끝 근처로 옮긴다.</summary>
+        static void Thrust()
+        {
+            var root = Root("PS_Thrust");
+
+            // 빛창 — 머리가 뒤에서 앞으로 순식간에 뻗고(쓸기 1 → 0), 잠깐 머문 뒤 뒤쪽부터 갉아먹힌다
+            var spear = MeshPS(root.transform, "Spear", _spear, Load("Mat_ESpear"), Vector3.zero);
+            var m = spear.main;
+            m.duration = 0.3f; m.startLifetime = 0.2f;
+            Size3(spear, 0.42f, 0.42f, 2.6f);
+            Burst(spear, 1);
+            Custom(spear, Curve(0f, 0f, 0.4f, 0.02f, 1f, 1f), Curve(0f, 1f, 0.22f, 0f, 1f, -0.05f));
+
+            var glow = MeshPS(root.transform, "SpearGlow", _spear, Load("Mat_ESpearGlow"), new Vector3(0f, 0f, -0.1f));
+            m = glow.main;
+            m.duration = 0.3f; m.startLifetime = 0.26f;
+            Size3(glow, 1.1f, 1.1f, 2.7f);
+            Burst(glow, 1);
+            Custom(glow, Curve(0f, 0f, 0.3f, 0.05f, 1f, 1f), Curve(0f, 1f, 0.2f, 0f, 1f, -0.05f));
+
+            // 속도선 — 앞으로 쏘아지는 가는 줄
+            var lines = PS(root.transform, "Lines", Sparkle(), new Vector3(0f, 0f, 0.2f));
+            m = lines.main;
+            m.duration = 0.3f;
+            m.startLifetime = new ParticleSystem.MinMaxCurve(0.07f, 0.12f);
+            m.startSpeed = new ParticleSystem.MinMaxCurve(18f, 30f);
+            m.startSize = new ParticleSystem.MinMaxCurve(0.04f, 0.08f);
+            m.startColor = new Color(0.85f, 0.94f, 1f);
+            Burst(lines, 7);
+            var sh = lines.shape; sh.enabled = true; sh.shapeType = ParticleSystemShapeType.Cone; sh.angle = 4f; sh.radius = 0.3f;
+            var r = lines.GetComponent<ParticleSystemRenderer>();
+            r.renderMode = ParticleSystemRenderMode.Stretch; r.lengthScale = 1f; r.velocityScale = 0.05f;
+            Fade(lines, 0f);
+
+            var tip = new GameObject("Tip").transform;
+            tip.SetParent(root.transform, false);
+            tip.localPosition = new Vector3(0f, 0f, 2.2f);
+
+            // 끝 번쩍 — 아주 짧게
+            var flash = PS(tip, "Flash", Sparkle(), Vector3.zero);
+            m = flash.main;
+            m.duration = 0.3f; m.startLifetime = 0.07f; m.startSize = 1.3f; m.startDelay = 0.04f;
+            m.startColor = new Color(0.9f, 0.96f, 1f);
+            Burst(flash, 1);
+            SizeCurve(flash, 0.6f, 1.2f);
+            Fade(flash, 0f);
+
+            var ring = PS(tip, "Ring", Load("Mat_FxThrustRing"), Vector3.zero);
+            m = ring.main;
+            m.duration = 0.3f; m.startLifetime = 0.18f; m.startSize = 1.2f; m.startDelay = 0.05f;
+            m.startRotation = new ParticleSystem.MinMaxCurve(0f, Mathf.PI * 2f);
+            m.startColor = new Color(0.85f, 0.93f, 1f, 0.8f);
+            Burst(ring, 1);
+            SizeCurve(ring, 0.3f, 1.3f);
+            Fade(ring, 0f);
+
+            var sparks = PS(tip, "Sparks", Sparkle(), Vector3.zero);
+            m = sparks.main;
+            m.duration = 0.3f; m.startDelay = 0.05f;
+            m.startLifetime = new ParticleSystem.MinMaxCurve(0.12f, 0.25f);
+            m.startSpeed = new ParticleSystem.MinMaxCurve(5f, 11f);
+            m.startSize = new ParticleSystem.MinMaxCurve(0.06f, 0.13f);
+            m.startColor = new Color(0.9f, 0.96f, 1f);
+            Burst(sparks, 9);
+            sh = sparks.shape; sh.enabled = true; sh.shapeType = ParticleSystemShapeType.Cone; sh.angle = 32f; sh.radius = 0.05f;
+            r = sparks.GetComponent<ParticleSystemRenderer>();
+            r.renderMode = ParticleSystemRenderMode.Stretch; r.lengthScale = 2f; r.velocityScale = 0.04f;
+            Fade(sparks, 0f);
+            var drag = sparks.limitVelocityOverLifetime; drag.enabled = true; drag.drag = 6f;
+
+            Save(root, "PS_Thrust");
+        }
+
+        // ───────────────────────────── 회전 ─────────────────────────────
+
+        /// <summary>플레이어에 붙어 계속 돈다 (반복). 반경 2.6m 기준 — SkillFx가 루트 크기로 늘이고, 반대로 돌 땐 X를 뒤집는다.</summary>
+        static void Whirl()
+        {
+            var root = Root("PS_Whirl");
+
+            // 회오리 — 꼬인 원통. 메시는 안 돌리고 UV만 흐른다. 짧게 나타났다 부서지기를 겹쳐 반복
+            ParticleSystem Vortex(string name, string mat, float y, float r, float h, float rate, float life, float alpha)
+            {
+                var ps = MeshPS(root.transform, name, _tube, Load(mat), new Vector3(0f, y, 0f));
+                var m = ps.main;
+                m.loop = true; m.duration = 1f; m.startLifetime = life;
+                Size3(ps, r, h, r);
+                m.startRotationY = new ParticleSystem.MinMaxCurve(0f, Mathf.PI * 2f);
+                m.startColor = new Color(1f, 1f, 1f, alpha);
+                var em = ps.emission; em.rateOverTime = rate;
+                Custom(ps, Curve(0f, 0.9f, 0.3f, 0.12f, 0.65f, 0.2f, 1f, 1f), null);
+                SizeCurve(ps, 0.92f, 1.06f, false);
+                return ps;
+            }
+            Vortex("Vortex", "Mat_EVortex", 0.05f, 2.4f, 1.5f, 7f, 0.5f, 1f);
+            Vortex("VortexInner", "Mat_EVortexInner", 0.25f, 1.7f, 1.7f, 6f, 0.4f, 1f);
+
+            // 칼날 호 — 몸 둘레 여러 높이에서 머리가 호를 따라 쓸고 지나가며 부서진다
+            var sl = MeshPS(root.transform, "Slashes", _arc, Load("Mat_ESlash"), new Vector3(0f, 0.95f, 0f));
+            var sm = sl.main;
+            sm.loop = true; sm.duration = 1f; sm.startLifetime = 0.24f;
+            sm.startSizeX = new ParticleSystem.MinMaxCurve(2.3f, 2.8f); sm.startSizeY = 1f; sm.startSizeZ = new ParticleSystem.MinMaxCurve(2.3f, 2.8f);
+            sm.startRotationX = new ParticleSystem.MinMaxCurve(Rad(-14f), Rad(14f));
+            sm.startRotationY = new ParticleSystem.MinMaxCurve(0f, Mathf.PI * 2f);
+            sm.startRotationZ = new ParticleSystem.MinMaxCurve(Rad(-10f), Rad(10f));
+            var sem = sl.emission; sem.rateOverTime = 15f;
+            var ssh = sl.shape; ssh.enabled = true; ssh.shapeType = ParticleSystemShapeType.Box; ssh.scale = new Vector3(0f, 0.9f, 0f);
+            Custom(sl, Curve(0f, 0f, 0.45f, 0.02f, 1f, 1f), Curve(0f, 1f, 0.55f, 0f, 1f, -0.35f));
+
+            // 바닥 바람 자국 — 흙빛 호가 발밑을 쓴다
+            var gw = MeshPS(root.transform, "GroundWind", _arc, Load("Mat_EGround"), new Vector3(0f, 0.06f, 0f));
+            var gm = gw.main;
+            gm.loop = true; gm.duration = 1f; gm.startLifetime = 0.4f;
+            Size3(gw, 2.8f, 1f, 2.8f);
+            gm.startRotationY = new ParticleSystem.MinMaxCurve(0f, Mathf.PI * 2f);
+            var gem = gw.emission; gem.rateOverTime = 6f;
+            Custom(gw, Curve(0f, 0.05f, 0.5f, 0.1f, 1f, 1f), Curve(0f, 1f, 0.6f, 0f, 1f, -0.3f));
+
+            // 흙먼지 — 둘레에서 바깥으로
+            var dust = PS(root.transform, "Dust", Load("Mat_FxDustPuff_Alpha"), new Vector3(0f, 0.15f, 0f));
+            var dm = dust.main;
+            dm.loop = true; dm.duration = 1f;
+            dm.startLifetime = new ParticleSystem.MinMaxCurve(0.5f, 0.8f);
+            dm.startSpeed = new ParticleSystem.MinMaxCurve(1.2f, 2.6f);
+            dm.startSize = new ParticleSystem.MinMaxCurve(0.6f, 1.1f);
+            dm.startRotation = new ParticleSystem.MinMaxCurve(0f, Mathf.PI * 2f);
+            dm.startColor = new Color(0.56f, 0.48f, 0.37f);
+            dm.gravityModifier = -0.15f;
+            dm.simulationSpace = ParticleSystemSimulationSpace.World;
+            var dem = dust.emission; dem.rateOverTime = 40f;
+            var dsh = dust.shape; dsh.enabled = true; dsh.shapeType = ParticleSystemShapeType.Circle; dsh.radius = 2.0f; dsh.radiusThickness = 0f;
+            dsh.rotation = new Vector3(90f, 0f, 0f);
+            var drot = dust.rotationOverLifetime; drot.enabled = true; drot.z = new ParticleSystem.MinMaxCurve(-1.5f, 1.5f);
+            SizeCurve(dust, 0.5f, 1.6f);
+            Fade(dust, 0.25f, 0.7f);
+            var ddrag = dust.limitVelocityOverLifetime; ddrag.enabled = true; ddrag.drag = 2.5f;
+
+            Save(root, "PS_Whirl");
+        }
+
+        // ───────────────────────────── 검기 ─────────────────────────────
+
+        /// <summary>날아가는 검기에 붙는다 (반복). +X가 날아가는 쪽 — 왼쪽이면 SkillFx가 루트를 Y 180° 돌린다.</summary>
+        static void Crescent()
+        {
+            var root = Root("PS_Crescent");
+
+            // 호를 세운다 (XZ → XY). 볼록한 쪽이 +X
+            var upright = new GameObject("Upright").transform;
+            upright.SetParent(root.transform, false);
+            upright.localPosition = new Vector3(0f, 1.0f, 0f);
+            upright.localRotation = Quaternion.Euler(90f, 0f, 0f);
+
+            // 잔상 — 월드 공간이라 지나간 자리에 남아 부서진다
+            var blade = MeshPS(upright, "Blade", _arc, Load("Mat_ECrescent"), Vector3.zero);
+            var m = blade.main;
+            m.loop = true; m.duration = 1f; m.startLifetime = 0.16f;
+            Size3(blade, 1.0f, 1f, 1.35f);
+            m.simulationSpace = ParticleSystemSimulationSpace.World;
+            m.startColor = new Color(1f, 1f, 1f, 0.7f);
+            var em = blade.emission; em.rateOverTime = 30f;
+            Custom(blade, Curve(0f, 0.05f, 1f, 1f), null);
+
+            // 날 끝 — 검기와 함께 움직이는 또렷한 초승달
+            var core = MeshPS(upright, "Core", _arc, Load("Mat_ECrescent"), Vector3.zero);
+            m = core.main;
+            m.loop = true; m.duration = 1f; m.startLifetime = 0.1f;
+            Size3(core, 1.05f, 1f, 1.3f);
+            em = core.emission; em.rateOverTime = 30f;
+            Custom(core, Curve(0f, 0f, 1f, 0.35f), null);
+
+            var wisps = PS(root.transform, "Wisps", Sparkle(), new Vector3(-0.3f, 1.0f, 0f));
+            m = wisps.main;
+            m.loop = true; m.duration = 1f;
+            m.startLifetime = new ParticleSystem.MinMaxCurve(0.25f, 0.45f);
+            m.startSpeed = new ParticleSystem.MinMaxCurve(0.2f, 1.2f);
+            m.startSize = new ParticleSystem.MinMaxCurve(0.08f, 0.2f);
+            m.startColor = new Color(0.8f, 0.92f, 1f);
+            m.simulationSpace = ParticleSystemSimulationSpace.World;
+            em = wisps.emission; em.rateOverTime = 50f;
+            var sh = wisps.shape; sh.enabled = true; sh.shapeType = ParticleSystemShapeType.Box; sh.scale = new Vector3(0.3f, 2.2f, 0.3f);
+            Fade(wisps, 0f);
+
+            Save(root, "PS_Crescent");
+        }
+    }
+}
+#endif

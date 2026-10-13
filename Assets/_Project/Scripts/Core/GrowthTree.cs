@@ -81,8 +81,7 @@ namespace Proto.Core
                     C("explore_camp", "야영", "던전당 1회, 피로도 30% 회복", GNodeKind.Unlock),
                     C("explore_return_stone", "귀환석", "언제든 즉시 귀환, 획득물 확정", GNodeKind.Unlock)),
                 S("explore_full_map", "지도", "방 배치 전체를 입장 시부터 공개", GNodeKind.Unlock, null,
-                    C("explore_open_doors", "문 열림", "봉인된 방 진입 비용 감소"),
-                    C("skill_sprint", "질주", "스킬 해금 — 4초간 이동 속도 +60%", GNodeKind.Skill)),
+                    C("explore_open_doors", "문 열림", "봉인된 방 진입 비용 감소")),
                 S("explore_shortcut", "지름길", "클리어한 층의 중간 지점부터 시작 가능", GNodeKind.Star, null,
                     C("explore_second_wind", "두 번째 바람", "피로도 20% 이하에서 이속 +30%, 소모 −20%", GNodeKind.Unlock),
                     C("explore_deep_adaptation", "심층 적응", "깊은 방일수록 피로도 소모 감소", GNodeKind.Unlock)));
@@ -193,8 +192,8 @@ namespace Proto.Core
         {
             const float FanShift = 0f;   // 전투 갈래 방향이 바뀌면 부채꼴도 같이 돌린다
             var root = Get("combat_training");
-            var t1 = new[] { ("skill_ground_slam", "내려찍기"), ("skill_whirlwind", "회전베기"), ("skill_rapid_thrusts", "연속 찌르기") };
-            var t2 = new[] { ("skill_sword_wave", "검기 날리기"), ("skill_iaido", "발도술"), ("skill_counter_stance", "반격 자세"), ("skill_war_cry", "전투 함성") };
+            var t1 = new[] { ("skill_ground_slam", "내려찍기"), ("skill_whirlwind", "회전베기"), ("skill_rapid_thrusts", "연속 찌르기"), ("skill_gale_slash", "질풍참") };
+            var t2 = new[] { ("skill_sword_wave", "검기 날리기"), ("skill_iaido", "발도술"), ("skill_counter_stance", "반격 자세"), ("skill_falling_blossom", "낙화참") };
             var row1 = new List<GNode>();
             for (int i = 0; i < t1.Length; i++)
                 row1.Add(Add(t1[i].Item1, t1[i].Item2, "스킬 해금 (핵 2) — 1단", GNodeKind.Skill, "combat", null, Polar(FanShift + 167f + i * 12f, 640f), root));

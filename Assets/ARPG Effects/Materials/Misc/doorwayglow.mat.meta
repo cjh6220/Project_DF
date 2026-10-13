@@ -1,0 +1,15 @@
+fileFormatVersion: 2
+guid: bc438f9924045384db5edc359878ca74
+timeCreated: 1432644923
+licenseType: Store
+NativeFormatImporter:
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 38222
+  packageName: Action RPG FX
+  packageVersion: 2.02
+  assetPath: Assets/ARPG Effects/Materials/Misc/doorwayglow.mat
+  uploadId: 689779

@@ -1,0 +1,15 @@
+fileFormatVersion: 2
+guid: 4a6b653d3356dc243a984ed355de3e39
+timeCreated: 1432497773
+licenseType: Store
+NativeFormatImporter:
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 38222
+  packageName: Action RPG FX
+  packageVersion: 2.02
+  assetPath: Assets/ARPG Effects/Prefabs/Loot/Gems/ItemGemRed.prefab
+  uploadId: 689779

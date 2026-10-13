@@ -1,0 +1,281 @@
+#if UNITY_EDITOR
+using UnityEditor;
+using UnityEngine;
+using UnityEngine.Rendering;
+
+namespace Proto.EditorTools
+{
+    /// <summary>
+    /// 스킬 이펙트 — 그림 → 재질 → 파티클 시스템 프리팹. 메뉴: Proto ▸ Build Skill FX
+    ///
+    ///   그림     Assets/Texture/Effect/Fx*.png (검은 바탕에 흰 그림 — 검정이 투명, 색은 파티클 색이 입힌다)
+    ///   재질     Assets/_Project/Resources/Fx/Skill/Mat_Fx*.mat (더하기 혼합 · 흙먼지만 알파 혼합)
+    ///   프리팹   Assets/_Project/Resources/Fx/Skill/PS_Thrust · PS_Whirl · PS_Crescent
+    ///
+    /// 프리팹은 인스펙터에서 직접 고쳐도 된다. 단 이 메뉴를 다시 누르면 처음 값으로 덮어쓴다
+    /// (고친 걸 남기려면 프리팹을 다른 이름으로 복사해 두고 SkillFx의 이름을 바꾼다).
+    ///   PS_Thrust    Spike(앞으로 뻗는 빛창) · Tip/Ring(끝에서 터지는 고리) · Tip/Sparks(불티)
+    ///   PS_Whirl     ArcHigh · ArcLow(몸 둘레를 도는 궤적) · Swirl(발밑 소용돌이) · Dust(흙먼지)
+    ///   PS_Crescent  Blade(초승달 검기 — 잔상이 남게 월드 공간) · Wisps(뒤로 흩어지는 빛 가루)
+    /// </summary>
+    public static class SkillFxBuilder
+    {
+        const string TexDir = "Assets/Texture/Effect/";
+        const string Dir = "Assets/_Project/Resources/Fx/Skill/";
+        static readonly string[] Names = { "FxThrustSpike", "FxThrustRing", "FxWhirlArc", "FxWindStreaks", "FxDustPuff", "FxCrescentWave" };
+
+        [MenuItem("Proto/Build Skill FX")]
+        public static void Build()
+        {
+            System.IO.Directory.CreateDirectory(Dir);
+            foreach (var n in Names) Mat("Mat_" + n, n, true, 2.2f);
+            Mat("Mat_FxDustPuff_Alpha", "FxDustPuff", false, 1f);
+            AssetDatabase.SaveAssets();
+
+            Thrust();
+            Whirl();
+            Crescent();
+            AssetDatabase.SaveAssets();
+            Debug.Log("[Proto] 스킬 이펙트 재질 · 파티클 프리팹 생성 완료");
+        }
+
+        // ───────────────────────────── 재질 ─────────────────────────────
+
+        static Material Load(string name) => AssetDatabase.LoadAssetAtPath<Material>(Dir + name + ".mat");
+
+        static void Mat(string matName, string texName, bool additive, float bright)
+        {
+            string texPath = TexDir + texName + ".png";
+            var imp = AssetImporter.GetAtPath(texPath) as TextureImporter;
+            if (imp == null) { Debug.LogWarning("[Proto] 스킬 이펙트 그림 없음: " + texPath); return; }
+            imp.textureType = TextureImporterType.Default;
+            imp.alphaSource = TextureImporterAlphaSource.FromGrayScale;
+            imp.alphaIsTransparency = true;
+            imp.wrapMode = TextureWrapMode.Clamp;
+            imp.mipmapEnabled = true;
+            imp.maxTextureSize = 512;
+            imp.SaveAndReimport();
+            var tex = AssetDatabase.LoadAssetAtPath<Texture2D>(texPath);
+
+            string path = Dir + matName + ".mat";
+            var m = AssetDatabase.LoadAssetAtPath<Material>(path);
+            if (m == null)
+            {
+                m = new Material(Shader.Find("Universal Render Pipeline/Particles/Unlit"));
+                AssetDatabase.CreateAsset(m, path);
+            }
+            m.SetTexture("_BaseMap", tex);
+            m.SetColor("_BaseColor", new Color(bright, bright, bright, 1f));   // 1을 넘겨 블룸에 걸린다
+            m.SetFloat("_Surface", 1f);
+            m.SetFloat("_Blend", additive ? 2f : 0f);
+            m.SetFloat("_SrcBlend", (float)BlendMode.SrcAlpha);
+            m.SetFloat("_DstBlend", (float)(additive ? BlendMode.One : BlendMode.OneMinusSrcAlpha));
+            m.SetFloat("_ZWrite", 0f);
+            m.SetFloat("_Cull", 0f);
+            m.EnableKeyword("_SURFACE_TYPE_TRANSPARENT");
+            if (!additive) m.EnableKeyword("_ALPHABLEND_ON"); else m.DisableKeyword("_ALPHABLEND_ON");
+            m.renderQueue = (int)RenderQueue.Transparent + 30;
+            m.SetOverrideTag("RenderType", "Transparent");
+            EditorUtility.SetDirty(m);
+        }
+
+        // ───────────────────────────── 공통 ─────────────────────────────
+
+        static ParticleSystem PS(Transform parent, string name, Material mat, Vector3 pos)
+        {
+            var go = new GameObject(name);
+            go.transform.SetParent(parent, false);
+            go.transform.localPosition = pos;
+            var ps = go.AddComponent<ParticleSystem>();
+            ps.Stop(true, ParticleSystemStopBehavior.StopEmittingAndClear);
+            var r = go.GetComponent<ParticleSystemRenderer>();
+            r.sharedMaterial = mat;
+            r.renderMode = ParticleSystemRenderMode.Billboard;
+            r.shadowCastingMode = ShadowCastingMode.Off;
+            r.receiveShadows = false;
+            r.sortMode = ParticleSystemSortMode.YoungestInFront;
+            var main = ps.main;
+            main.playOnAwake = true;
+            main.loop = false;
+            main.duration = 1f;
+            main.scalingMode = ParticleSystemScalingMode.Hierarchy;
+            main.startSpeed = 0f;
+            var em = ps.emission; em.rateOverTime = 0f;
+            var sh = ps.shape; sh.enabled = false;
+            return ps;
+        }
+
+        static void Burst(ParticleSystem ps, int count)
+        {
+            var em = ps.emission;
+            em.SetBursts(new[] { new ParticleSystem.Burst(0f, (short)count) });
+        }
+
+        /// <summary>알파가 0 → peak(at) → 0으로 흐르는 색 곡선.</summary>
+        static void Fade(ParticleSystem ps, float inAt, float peak = 1f)
+        {
+            var col = ps.colorOverLifetime; col.enabled = true;
+            var g = new Gradient();
+            g.SetKeys(new[] { new GradientColorKey(Color.white, 0f), new GradientColorKey(Color.white, 1f) },
+                      inAt <= 0f
+                        ? new[] { new GradientAlphaKey(peak, 0f), new GradientAlphaKey(0f, 1f) }
+                        : new[] { new GradientAlphaKey(0f, 0f), new GradientAlphaKey(peak, inAt), new GradientAlphaKey(0f, 1f) });
+            col.color = g;
+        }
+
+        static void SizeCurve(ParticleSystem ps, float from, float to, bool easeOut = true)
+        {
+            var s = ps.sizeOverLifetime; s.enabled = true;
+            var c = easeOut
+                ? new AnimationCurve(new Keyframe(0f, from, 0f, (to - from) * 2f), new Keyframe(1f, to, 0f, 0f))
+                : AnimationCurve.Linear(0f, from, 1f, to);
+            s.size = new ParticleSystem.MinMaxCurve(1f, c);
+        }
+
+        static GameObject Root(string name) => new GameObject(name);
+
+        static void Save(GameObject root, string name)
+        {
+            PrefabUtility.SaveAsPrefabAsset(root, Dir + name + ".prefab");
+            Object.DestroyImmediate(root);
+        }
+
+        static Material Sparkle()
+        {
+            var m = AssetDatabase.LoadAssetAtPath<Material>("Assets/_Project/Resources/Fx/Loot/Mat_Sparkle.mat");
+            return m != null ? m : Load("Mat_FxThrustRing");
+        }
+
+        // ───────────────────────────── 찌르기 ─────────────────────────────
+
+        /// <summary>앞(+Z)으로 찌른다. SkillFx가 칼끝 근처에 놓고 찌르는 쪽을 보게 돌린다. Tip은 찌르는 길이만큼 앞으로 옮긴다.</summary>
+        static void Thrust()
+        {
+            var root = Root("PS_Thrust");
+
+            var spike = PS(root.transform, "Spike", Load("Mat_FxThrustSpike"), Vector3.zero);
+            var m = spike.main;
+            m.duration = 0.3f; m.startLifetime = 0.14f; m.startSpeed = 14f; m.startSize = 0.6f;
+            m.startColor = new Color(0.78f, 0.9f, 1f);
+            Burst(spike, 1);
+            var sh = spike.shape; sh.enabled = true; sh.shapeType = ParticleSystemShapeType.Cone; sh.angle = 0f; sh.radius = 0.001f;
+            var r = spike.GetComponent<ParticleSystemRenderer>();
+            r.renderMode = ParticleSystemRenderMode.Stretch; r.lengthScale = 4f; r.velocityScale = 0.06f;
+            SizeCurve(spike, 1f, 0.35f);
+            Fade(spike, 0f);
+
+            var tip = new GameObject("Tip").transform;
+            tip.SetParent(root.transform, false);
+            tip.localPosition = new Vector3(0f, 0f, 2.6f);
+
+            var ring = PS(tip, "Ring", Load("Mat_FxThrustRing"), Vector3.zero);
+            m = ring.main;
+            m.duration = 0.3f; m.startLifetime = 0.2f; m.startSize = 1.5f; m.startDelay = 0.04f;
+            m.startRotation = new ParticleSystem.MinMaxCurve(0f, Mathf.PI * 2f);
+            m.startColor = new Color(0.85f, 0.93f, 1f);
+            Burst(ring, 1);
+            SizeCurve(ring, 0.25f, 1.25f);
+            Fade(ring, 0f);
+            var rot = ring.rotationOverLifetime; rot.enabled = true; rot.z = new ParticleSystem.MinMaxCurve(-2f, 2f);
+
+            var sparks = PS(tip, "Sparks", Sparkle(), Vector3.zero);
+            m = sparks.main;
+            m.duration = 0.3f; m.startDelay = 0.04f;
+            m.startLifetime = new ParticleSystem.MinMaxCurve(0.12f, 0.25f);
+            m.startSpeed = new ParticleSystem.MinMaxCurve(5f, 11f);
+            m.startSize = new ParticleSystem.MinMaxCurve(0.08f, 0.16f);
+            m.startColor = new Color(0.9f, 0.96f, 1f);
+            Burst(sparks, 9);
+            sh = sparks.shape; sh.enabled = true; sh.shapeType = ParticleSystemShapeType.Cone; sh.angle = 28f; sh.radius = 0.05f;
+            r = sparks.GetComponent<ParticleSystemRenderer>();
+            r.renderMode = ParticleSystemRenderMode.Stretch; r.lengthScale = 2f; r.velocityScale = 0.04f;
+            Fade(sparks, 0f);
+            var drag = sparks.limitVelocityOverLifetime; drag.enabled = true; drag.drag = 6f;
+
+            Save(root, "PS_Thrust");
+        }
+
+        // ───────────────────────────── 회전 ─────────────────────────────
+
+        /// <summary>플레이어에 붙어 계속 돈다 (반복). SkillFx가 스킬 시간 뒤 멈춘다. 크기는 반경 2.6m 기준 — 루트 크기로 늘인다.</summary>
+        static void Whirl()
+        {
+            var root = Root("PS_Whirl");
+
+            ParticleSystem Arc(string name, float y, float size, float spin, Color c, Material mat, float rate, float life, float peak)
+            {
+                var ps = PS(root.transform, name, mat, new Vector3(0f, y, 0f));
+                var m = ps.main;
+                m.loop = true; m.duration = 1f;
+                m.startLifetime = life;
+                m.startSize = new ParticleSystem.MinMaxCurve(size * 0.94f, size * 1.06f);
+                m.startRotation = new ParticleSystem.MinMaxCurve(0f, Mathf.PI * 2f);
+                m.startColor = c;
+                m.simulationSpace = ParticleSystemSimulationSpace.Local;
+                var em = ps.emission; em.rateOverTime = rate;
+                var rot = ps.rotationOverLifetime; rot.enabled = true; rot.z = spin;
+                ps.GetComponent<ParticleSystemRenderer>().renderMode = ParticleSystemRenderMode.HorizontalBillboard;
+                Fade(ps, 0.2f, peak);
+                return ps;
+            }
+
+            Arc("ArcHigh", 1.1f, 5.2f, 16f, new Color(0.75f, 0.86f, 1f), Load("Mat_FxWhirlArc"), 18f, 0.3f, 1f);
+            Arc("ArcLow", 0.55f, 4.4f, 13f, new Color(0.6f, 0.72f, 0.95f), Load("Mat_FxWhirlArc"), 14f, 0.3f, 0.8f);
+            var swirl = Arc("Swirl", 0.06f, 6f, 9f, new Color(0.7f, 0.8f, 0.95f), Load("Mat_FxWindStreaks"), 8f, 0.5f, 0.6f);
+            SizeCurve(swirl, 0.85f, 1.1f, false);
+
+            var dust = PS(root.transform, "Dust", Load("Mat_FxDustPuff_Alpha"), new Vector3(0f, 0.15f, 0f));
+            var dm = dust.main;
+            dm.loop = true; dm.duration = 1f;
+            dm.startLifetime = new ParticleSystem.MinMaxCurve(0.5f, 0.8f);
+            dm.startSpeed = new ParticleSystem.MinMaxCurve(1.2f, 2.6f);
+            dm.startSize = new ParticleSystem.MinMaxCurve(0.6f, 1.1f);
+            dm.startRotation = new ParticleSystem.MinMaxCurve(0f, Mathf.PI * 2f);
+            dm.startColor = new Color(0.56f, 0.48f, 0.37f);
+            dm.gravityModifier = -0.15f;
+            dm.simulationSpace = ParticleSystemSimulationSpace.World;
+            var dem = dust.emission; dem.rateOverTime = 45f;
+            var dsh = dust.shape; dsh.enabled = true; dsh.shapeType = ParticleSystemShapeType.Circle; dsh.radius = 2.0f; dsh.radiusThickness = 0f;
+            dsh.rotation = new Vector3(90f, 0f, 0f);   // 바닥과 나란히 — 둘레에서 바깥으로
+            var drot = dust.rotationOverLifetime; drot.enabled = true; drot.z = new ParticleSystem.MinMaxCurve(-1.5f, 1.5f);
+            SizeCurve(dust, 0.5f, 1.6f);
+            Fade(dust, 0.25f, 0.75f);
+            var ddrag = dust.limitVelocityOverLifetime; ddrag.enabled = true; ddrag.drag = 2.5f;
+
+            Save(root, "PS_Whirl");
+        }
+
+        // ───────────────────────────── 검기 ─────────────────────────────
+
+        /// <summary>날아가는 검기에 붙는다 (반복). 월드 공간이라 지나간 자리에 초승달 잔상이 남는다. 왼쪽이면 SkillFx가 뒤집는다.</summary>
+        static void Crescent()
+        {
+            var root = Root("PS_Crescent");
+
+            var blade = PS(root.transform, "Blade", Load("Mat_FxCrescentWave"), new Vector3(0f, 1.0f, 0f));
+            var m = blade.main;
+            m.loop = true; m.duration = 1f;
+            m.startLifetime = 0.2f; m.startSize = 3.0f;
+            m.startColor = new Color(0.72f, 0.86f, 1f);
+            m.simulationSpace = ParticleSystemSimulationSpace.World;
+            var em = blade.emission; em.rateOverTime = 50f;
+            SizeCurve(blade, 1f, 1.12f, false);
+            Fade(blade, 0f);
+
+            var wisps = PS(root.transform, "Wisps", Sparkle(), new Vector3(-0.3f, 1.0f, 0f));
+            m = wisps.main;
+            m.loop = true; m.duration = 1f;
+            m.startLifetime = new ParticleSystem.MinMaxCurve(0.25f, 0.45f);
+            m.startSpeed = new ParticleSystem.MinMaxCurve(0.2f, 1.2f);
+            m.startSize = new ParticleSystem.MinMaxCurve(0.1f, 0.24f);
+            m.startColor = new Color(0.8f, 0.92f, 1f);
+            m.simulationSpace = ParticleSystemSimulationSpace.World;
+            em = wisps.emission; em.rateOverTime = 70f;
+            var sh = wisps.shape; sh.enabled = true; sh.shapeType = ParticleSystemShapeType.Box; sh.scale = new Vector3(0.3f, 2.2f, 0.3f);
+            Fade(wisps, 0f);
+
+            Save(root, "PS_Crescent");
+        }
+    }
+}
+#endif

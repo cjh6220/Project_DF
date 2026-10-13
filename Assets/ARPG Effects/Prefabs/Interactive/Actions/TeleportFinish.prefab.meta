@@ -1,0 +1,15 @@
+fileFormatVersion: 2
+guid: 6fed2eb6a9e2f5e4892b57ce34fbee4b
+timeCreated: 1432655927
+licenseType: Store
+NativeFormatImporter:
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 38222
+  packageName: Action RPG FX
+  packageVersion: 2.02
+  assetPath: Assets/ARPG Effects/Prefabs/Interactive/Actions/TeleportFinish.prefab
+  uploadId: 689779

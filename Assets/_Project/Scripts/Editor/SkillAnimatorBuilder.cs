@@ -21,8 +21,8 @@ namespace Proto.EditorTools
         // 상태, 클립 파일, 클립 이름, 속도
         static readonly (string state, string file, string clip, float speed)[] States =
         {
-            ("Skill_Dash",       "M_katana_Blade@Dash_Attack_ver_B.FBX",          "Dash_Attack_ver_B",          1.15f),
-            ("Skill_Upper",      "M_katana_Blade@UpperAttack_ZeroHeight.FBX",     "UpperAttack_ZeroHeight",     1.2f),
+            ("Skill_Dash",       "M_katana_Blade@Skill_A.FBX",                    "Skill_A",                    1.15f),
+            ("Skill_Upper",      "M_katana_Blade@UpperAttack_Z0.FBX",             "UpperAttack_Z0",             1.2f),
             ("Skill_Slam",       "M_katana_Blade@Skill_D.FBX",                    "Skill_D",                    1.45f),
             ("Skill_Whirl",      "M_Big_Sword@Skill_E.FBX",                       "Skill_E",                    1.2f),
             ("Skill_Thrust",     "M_katana_Blade@Skill_B.FBX",                    "Skill_B",                    1.25f),
@@ -32,7 +32,8 @@ namespace Proto.EditorTools
             ("Skill_GuardLoop",  "M_katana_Blade@Revenge_Guard_Loop.FBX",         "Revenge_Guard_Loop",         1f),
             ("Skill_GuardAtk",   "M_katana_Blade@Revenge_Guard_Attack_ver_A.FBX", "Revenge_Guard_Attack_ver_A", 1f),
             ("Skill_GuardEnd",   "M_katana_Blade@Revenge_Guard_End.FBX",          "Revenge_Guard_End",          1f),
-            ("Skill_WarCry",     "Sword_Ultimate.anim",                           "Sword_Ultimate",             1f),
+            ("Skill_Gale",       "M_katana_Blade@Skill_C.FBX",                    "Skill_C",                    1.2f),
+            ("Skill_Fall",       "M_katana_Blade@Skill_G.FBX",                    "Skill_G",                    1.15f),
             ("Skill_Ultimate",   "Jump_Attack_New.anim",                          "Jump_Attack_New",            1.15f),
         };
 

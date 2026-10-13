@@ -1,0 +1,15 @@
+fileFormatVersion: 2
+guid: d9c24082e2e4b194e89190d0e35aba7a
+NativeFormatImporter:
+  externalObjects: {}
+  mainObjectFileID: 0
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 38222
+  packageName: Action RPG FX
+  packageVersion: 2.02
+  assetPath: Assets/ARPG Effects/Demo/Animation/Lid.controller
+  uploadId: 689779

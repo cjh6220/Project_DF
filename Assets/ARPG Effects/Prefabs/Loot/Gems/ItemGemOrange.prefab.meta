@@ -1,0 +1,15 @@
+fileFormatVersion: 2
+guid: 4f6ef80a7822e2145855ef3033ba8fc0
+timeCreated: 1432497772
+licenseType: Store
+NativeFormatImporter:
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 38222
+  packageName: Action RPG FX
+  packageVersion: 2.02
+  assetPath: Assets/ARPG Effects/Prefabs/Loot/Gems/ItemGemOrange.prefab
+  uploadId: 689779

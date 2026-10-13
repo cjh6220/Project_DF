@@ -1,0 +1,14 @@
+fileFormatVersion: 2
+guid: 64f97bcadc30ea54680b892789161068
+PrefabImporter:
+  externalObjects: {}
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 38222
+  packageName: Action RPG FX
+  packageVersion: 2.02
+  assetPath: Assets/ARPG Effects/Prefabs/Combat/CharacterCircle/CharacterCircleRed.prefab
+  uploadId: 689779

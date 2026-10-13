@@ -1,0 +1,14 @@
+fileFormatVersion: 2
+guid: 34ba00aead6526c479f4eeed81994ebe
+PrefabImporter:
+  externalObjects: {}
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 38222
+  packageName: Action RPG FX
+  packageVersion: 2.02
+  assetPath: Assets/ARPG Effects/Prefabs/Interactive/Actions/ClickMoveArrows.prefab
+  uploadId: 689779

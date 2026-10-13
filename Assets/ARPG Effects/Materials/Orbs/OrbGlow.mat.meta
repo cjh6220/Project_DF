@@ -1,0 +1,15 @@
+fileFormatVersion: 2
+guid: 2d8b91518ccbaa545b00ba8e58594a33
+timeCreated: 1432231795
+licenseType: Store
+NativeFormatImporter:
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 38222
+  packageName: Action RPG FX
+  packageVersion: 2.02
+  assetPath: Assets/ARPG Effects/Materials/Orbs/OrbGlow.mat
+  uploadId: 689779

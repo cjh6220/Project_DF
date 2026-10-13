@@ -153,6 +153,17 @@ namespace Proto.Dungeon
                 SpawnOne(player, affix);
         }
 
+        /// <summary>스킬 테스트 씬에서 몬스터를 원하는 자리에 세운다.</summary>
+        public EnemyController SpawnForTest(Transform player, Proto.Enemy.Affix affix, Vector3 at) => SpawnOne(player, affix, at);
+
+        /// <summary>스킬 테스트 씬에서 이 던전의 보스를 세운다.</summary>
+        public Health SpawnBossForTest(Transform player)
+        {
+            int before = _spawned.Count;
+            SpawnBoss(player);
+            return _spawned.Count > before && _spawned[_spawned.Count - 1] != null ? _spawned[_spawned.Count - 1].GetComponent<Health>() : null;
+        }
+
         EnemyController SpawnOne(Transform player, Proto.Enemy.Affix affix, Vector3? at = null)
         {
             var pos = at ?? EnemySpawnPoint();

@@ -1,0 +1,279 @@
+using System.Collections.Generic;
+using UnityEngine;
+using UnityEngine.Animations;
+using UnityEngine.InputSystem;
+using UnityEngine.Playables;
+
+namespace Proto.Dev
+{
+    /// <summary>
+    /// 캐릭터 애니메이션 보기 씬 (Assets/Scenes/AnimViewer.unity). 메뉴 Proto ▸ Build Animation Viewer Scene 으로 만든다.
+    ///
+    ///   왼쪽     클립 목록 — 맨 위 "사용 중"(Player.controller 상태 이름과 함께), 그 아래 폴더별 전체 휴머노이드 클립
+    ///            검색 칸에 이름 일부를 치면 걸러진다
+    ///   아래     재생 / 멈춤 · 이전 / 다음 · 속도 · 반복 · 루트 모션 · 시간 막대 · 정보 (길이 · 프레임 · 경로)
+    ///   키       ↑ ↓ 이전 · 다음 클립   Space 재생 · 멈춤   ← → 한 프레임 (멈춘 동안)   R 제자리   F 카메라 초기화
+    ///   카메라   오른쪽 드래그 회전 · 휠 확대 · 가운데 드래그 이동
+    /// 개발용 도구라 마우스 · 키보드로 쓴다. 게임 빌드에는 들어가지 않는 씬이다.
+    /// </summary>
+    public class AnimViewer : MonoBehaviour
+    {
+        [SerializeField] Animator target;
+        [SerializeField] Camera cam;
+        [SerializeField] AnimationClip[] clips;
+        [SerializeField] string[] groups;
+        [SerializeField] string[] labels;
+        [SerializeField] string[] paths;
+
+        PlayableGraph _graph;
+        AnimationClipPlayable _play;
+        int _sel = -1;
+        bool _paused, _loop = true, _rootMotion;
+        float _speed = 1f;
+        string _search = "";
+        Vector2 _scroll;
+        readonly HashSet<string> _folded = new();
+        readonly List<int> _visible = new();
+        Vector3 _home;
+        Quaternion _homeRot;
+
+        // 카메라
+        float _yaw = 90f, _pitch = 8f, _dist = 4.2f;
+        Vector3 _focus = new Vector3(0f, 0.95f, 0f);
+
+        static readonly float[] Speeds = { 0.1f, 0.25f, 0.5f, 1f, 1.5f, 2f };
+
+        void Start()
+        {
+            if (target == null) target = FindFirstObjectByType<Animator>();
+            if (cam == null) cam = Camera.main;
+            target.runtimeAnimatorController = null;
+            target.applyRootMotion = false;
+            target.fireEvents = false;   // 클립에 박힌 이벤트 받을 곳이 없다
+            _home = target.transform.position;
+            _homeRot = target.transform.rotation;
+            Select(0);
+        }
+
+        void OnDestroy()
+        {
+            if (_graph.IsValid()) _graph.Destroy();
+        }
+
+        // ───────────────────────────── 재생 ─────────────────────────────
+
+        void Select(int i)
+        {
+            if (clips == null || clips.Length == 0) return;
+            i = Mathf.Clamp(i, 0, clips.Length - 1);
+            _sel = i;
+            if (_graph.IsValid()) _graph.Destroy();
+            ResetPos();
+            _graph = PlayableGraph.Create("AnimViewer");
+            _graph.SetTimeUpdateMode(DirectorUpdateMode.GameTime);
+            var output = AnimationPlayableOutput.Create(_graph, "Anim", target);
+            _play = AnimationClipPlayable.Create(_graph, clips[i]);
+            _play.SetApplyFootIK(true);
+            output.SetSourcePlayable(_play);
+            _play.SetSpeed(_paused ? 0f : _speed);
+            _graph.Play();
+        }
+
+        void ResetPos()
+        {
+            target.transform.SetPositionAndRotation(_home, _homeRot);
+        }
+
+        void Update()
+        {
+            HandleKeys();
+            HandleCamera();
+            if (!_play.IsValid()) return;
+
+            target.applyRootMotion = _rootMotion;
+            var clip = clips[_sel];
+            double t = _play.GetTime();
+            if (t >= clip.length)
+            {
+                if (_loop) { _play.SetTime(0); _play.SetTime(0); if (_rootMotion) ResetPos(); }
+                else { _play.SetTime(clip.length); _play.SetSpeed(0f); }
+            }
+        }
+
+        void HandleKeys()
+        {
+            var k = Keyboard.current;
+            if (k == null) return;
+            if (k.downArrowKey.wasPressedThisFrame) Step(1);
+            if (k.upArrowKey.wasPressedThisFrame) Step(-1);
+            if (k.spaceKey.wasPressedThisFrame) TogglePause();
+            if (k.rKey.wasPressedThisFrame) ResetPos();
+            if (k.fKey.wasPressedThisFrame) { _yaw = 90f; _pitch = 8f; _dist = 4.2f; _focus = _home + new Vector3(0f, 0.95f, 0f); }
+            if (_paused && _play.IsValid())
+            {
+                float frame = 1f / Mathf.Max(1f, clips[_sel].frameRate);
+                if (k.rightArrowKey.wasPressedThisFrame) Seek((float)_play.GetTime() + frame);
+                if (k.leftArrowKey.wasPressedThisFrame) Seek((float)_play.GetTime() - frame);
+            }
+        }
+
+        /// <summary>목록에 보이는 것 중에서 앞뒤로.</summary>
+        void Step(int dir)
+        {
+            if (_visible.Count == 0) return;
+            int at = _visible.IndexOf(_sel);
+            at = at < 0 ? 0 : Mathf.Clamp(at + dir, 0, _visible.Count - 1);
+            Select(_visible[at]);
+        }
+
+        void TogglePause()
+        {
+            _paused = !_paused;
+            if (_play.IsValid())
+            {
+                if (!_paused && _play.GetTime() >= clips[_sel].length) _play.SetTime(0);
+                _play.SetSpeed(_paused ? 0f : _speed);
+            }
+        }
+
+        void Seek(float t)
+        {
+            if (!_play.IsValid()) return;
+            t = Mathf.Clamp(t, 0f, clips[_sel].length);
+            _play.SetTime(t); _play.SetTime(t);   // 두 번 — 루트 모션 델타가 튀지 않게
+            _graph.Evaluate();
+        }
+
+        void HandleCamera()
+        {
+            if (cam == null) return;
+            var m = Mouse.current;
+            bool overUi = m != null && OverPanel(m.position.ReadValue());
+            if (m != null && !overUi)
+            {
+                var d = m.delta.ReadValue();
+                if (m.rightButton.isPressed) { _yaw += d.x * 0.25f; _pitch = Mathf.Clamp(_pitch - d.y * 0.2f, -20f, 80f); }
+                if (m.middleButton.isPressed)
+                {
+                    var right = cam.transform.right; var up = cam.transform.up;
+                    _focus -= (right * d.x + up * d.y) * 0.003f * _dist;
+                }
+                float wheel = m.scroll.ReadValue().y;
+                if (Mathf.Abs(wheel) > 0.01f) _dist = Mathf.Clamp(_dist * (wheel > 0 ? 0.9f : 1.1f), 1.2f, 20f);
+            }
+            var rot = Quaternion.Euler(_pitch, _yaw - 90f, 0f);
+            cam.transform.position = _focus - rot * Vector3.forward * _dist;
+            cam.transform.rotation = rot;
+        }
+
+        // ───────────────────────────── 창 ─────────────────────────────
+
+        GUIStyle _label, _small, _head, _item, _itemSel, _btn, _field, _box, _toggle;
+        static Font _font;
+        const float ListW = 430f;
+
+        bool OverPanel(Vector2 mouse)
+        {
+            float s = Screen.height / 1080f;
+            float y = Screen.height - mouse.y;
+            return mouse.x < (ListW + 20f) * s || y > Screen.height - 200f * s;
+        }
+
+        void Styles()
+        {
+            if (_label != null) return;
+            if (_font == null && TMPro.TMP_Settings.defaultFontAsset != null) _font = TMPro.TMP_Settings.defaultFontAsset.sourceFontFile;
+            Texture2D Tex(Color c) { var t = new Texture2D(1, 1); t.SetPixel(0, 0, c); t.Apply(); return t; }
+            _box = new GUIStyle(GUI.skin.box) { normal = { background = Tex(new Color(0.04f, 0.05f, 0.08f, 0.9f)) }, padding = new RectOffset(10, 10, 8, 8) };
+            _label = new GUIStyle(GUI.skin.label) { fontSize = 15, richText = true, normal = { textColor = Color.white } };
+            _small = new GUIStyle(_label) { fontSize = 13, normal = { textColor = new Color(0.68f, 0.66f, 0.76f) } };
+            _head = new GUIStyle(_label) { fontSize = 14, fontStyle = FontStyle.Bold, normal = { textColor = new Color(1f, 0.83f, 0.42f) } };
+            _item = new GUIStyle(_label) { fontSize = 14, padding = new RectOffset(14, 4, 2, 2), normal = { textColor = new Color(0.86f, 0.86f, 0.92f) },
+                                           hover = { textColor = Color.white, background = Tex(new Color(1f, 1f, 1f, 0.06f)) } };
+            _itemSel = new GUIStyle(_item) { normal = { textColor = Color.black, background = Tex(new Color(1f, 0.83f, 0.42f, 0.95f)) } };
+            _btn = new GUIStyle(GUI.skin.button) { fontSize = 14 };
+            _field = new GUIStyle(GUI.skin.textField) { fontSize = 15 };
+            _toggle = new GUIStyle(GUI.skin.toggle) { fontSize = 14, normal = { textColor = Color.white }, onNormal = { textColor = Color.white }, hover = { textColor = Color.white }, onHover = { textColor = Color.white } };
+            if (_font != null) _box.font = _label.font = _small.font = _head.font = _item.font = _itemSel.font = _btn.font = _field.font = _toggle.font = _font;
+        }
+
+        void OnGUI()
+        {
+            if (clips == null || clips.Length == 0) { GUI.Label(new Rect(20, 20, 600, 30), "클립이 없습니다 — 메뉴 Proto ▸ Build Animation Viewer Scene"); return; }
+            Styles();
+            float s = Screen.height / 1080f;
+            var old = GUI.matrix;
+            GUI.matrix = Matrix4x4.Scale(new Vector3(s, s, 1f));
+            float W = Screen.width / s, H = 1080f;
+
+            // ── 목록 ──
+            GUILayout.BeginArea(new Rect(10f, 10f, ListW, H - 220f), _box);
+            GUILayout.Label($"<b>애니메이션</b>  <color=#a8a4b8>{clips.Length}개</color>", _label);
+            GUILayout.BeginHorizontal();
+            GUILayout.Label("검색", _small, GUILayout.Width(36f));
+            var ns = GUILayout.TextField(_search, _field);
+            if (ns != _search) { _search = ns; _scroll = Vector2.zero; }
+            if (GUILayout.Button("×", _btn, GUILayout.Width(26f))) _search = "";
+            GUILayout.EndHorizontal();
+
+            _visible.Clear();
+            _scroll = GUILayout.BeginScrollView(_scroll);
+            string lastGroup = null;
+            string q = _search.Trim().ToLowerInvariant();
+            for (int i = 0; i < clips.Length; i++)
+            {
+                if (clips[i] == null) continue;
+                string label = labels[i];
+                if (q.Length > 0 && !label.ToLowerInvariant().Contains(q) && !groups[i].ToLowerInvariant().Contains(q)) continue;
+                if (groups[i] != lastGroup)
+                {
+                    lastGroup = groups[i];
+                    bool folded = _folded.Contains(lastGroup) && q.Length == 0;
+                    if (GUILayout.Button((folded ? "▶ " : "▼ ") + lastGroup, _head)) { if (!_folded.Remove(lastGroup)) _folded.Add(lastGroup); }
+                }
+                if (_folded.Contains(groups[i]) && q.Length == 0) continue;
+                _visible.Add(i);
+                if (GUILayout.Button(label, i == _sel ? _itemSel : _item)) Select(i);
+            }
+            GUILayout.EndScrollView();
+            GUILayout.EndArea();
+
+            // ── 재생 ──
+            var clip = _sel >= 0 ? clips[_sel] : null;
+            GUILayout.BeginArea(new Rect(10f, H - 200f, W - 20f, 190f), _box);
+            if (clip != null)
+            {
+                float t = _play.IsValid() ? (float)_play.GetTime() : 0f;
+                int frames = Mathf.RoundToInt(clip.length * clip.frameRate);
+                GUILayout.Label($"<b><size=18>{labels[_sel]}</size></b>   <color=#a8a4b8>{groups[_sel]}</color>", _label);
+                GUILayout.Label($"길이 {clip.length:0.00}초 · {frames}프레임 @ {clip.frameRate:0}fps · 반복 {(clip.isLooping ? "있음" : "없음")} · 이벤트 {clip.events.Length}개 · 휴머노이드 {(clip.humanMotion ? "예" : "아니오")}   <color=#7d7a8c>{paths[_sel]}</color>", _small);
+
+                GUILayout.BeginHorizontal();
+                GUILayout.Label($"{t:0.00} / {clip.length:0.00}  ({Mathf.RoundToInt(t * clip.frameRate)}f)", _label, GUILayout.Width(200f));
+                float nt = GUILayout.HorizontalSlider(t, 0f, clip.length);
+                if (Mathf.Abs(nt - t) > 0.0001f) { if (!_paused) TogglePause(); Seek(nt); }
+                GUILayout.EndHorizontal();
+
+                GUILayout.BeginHorizontal();
+                if (GUILayout.Button("▲ 이전", _btn, GUILayout.Width(80f))) Step(-1);
+                if (GUILayout.Button(_paused ? "▶ 재생" : "❚❚ 멈춤", _btn, GUILayout.Width(90f))) TogglePause();
+                if (GUILayout.Button("▼ 다음", _btn, GUILayout.Width(80f))) Step(1);
+                GUILayout.Space(16f);
+                GUILayout.Label("속도", _label, GUILayout.Width(36f));
+                foreach (var sp in Speeds)
+                    if (GUILayout.Toggle(Mathf.Approximately(_speed, sp), sp + "x", _btn, GUILayout.Width(52f)) && !Mathf.Approximately(_speed, sp))
+                    { _speed = sp; if (!_paused && _play.IsValid()) _play.SetSpeed(_speed); }
+                GUILayout.Space(16f);
+                _loop = GUILayout.Toggle(_loop, " 반복", _toggle, GUILayout.Width(70f));
+                bool rm = GUILayout.Toggle(_rootMotion, " 루트 모션 (실제로 움직이기)", _toggle, GUILayout.Width(230f));
+                if (rm != _rootMotion) { _rootMotion = rm; ResetPos(); }
+                if (GUILayout.Button("제자리 (R)", _btn, GUILayout.Width(100f))) ResetPos();
+                GUILayout.FlexibleSpace();
+                GUILayout.EndHorizontal();
+                GUILayout.Label("↑↓ 클립   Space 재생·멈춤   ←→ 한 프레임(멈춘 동안)   R 제자리   F 카메라   ·   오른쪽 드래그 회전 · 휠 확대 · 가운데 드래그 이동", _small);
+            }
+            GUILayout.EndArea();
+            GUI.matrix = old;
+        }
+    }
+}

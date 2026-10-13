@@ -47,6 +47,8 @@ namespace Proto.Enemy
 
         /// <summary>띄워져 있다 (EnemyVisual이 몸을 젖힌다).</summary>
         public bool Airborne => _airborne;
+        /// <summary>스킬 테스트 허수아비 — 움직이지도 때리지도 않는다 (맞고 뜨고 밀리는 건 그대로).</summary>
+        public bool Passive;
         /// <summary>떨어져 누워 있다.</summary>
         public bool Downed => !_airborne && Time.time < _downUntil;
         public float AirVy => _vy;
@@ -133,6 +135,7 @@ namespace Proto.Enemy
                 return;
             }
 
+            if (Passive) return;    // 스킬 테스트 허수아비 — 맞기만 한다
             if (_casting) return;   // 스킬 쓰는 중 — 스킬이 몸을 움직인다
 
             var to = _player.position - transform.position;

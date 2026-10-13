@@ -1,0 +1,15 @@
+fileFormatVersion: 2
+guid: bd6e3e9b46bda134d90f86f3b35b0e89
+timeCreated: 1432649379
+licenseType: Store
+NativeFormatImporter:
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 38222
+  packageName: Action RPG FX
+  packageVersion: 2.02
+  assetPath: Assets/ARPG Effects/Prefabs/Interactive/Actions/IdentifyFinish.prefab
+  uploadId: 689779

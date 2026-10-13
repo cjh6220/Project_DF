@@ -1,0 +1,14 @@
+fileFormatVersion: 2
+guid: d25d25ca6583f0747bb6fbd95b181c39
+PrefabImporter:
+  externalObjects: {}
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 38222
+  packageName: Action RPG FX
+  packageVersion: 2.02
+  assetPath: Assets/ARPG Effects/Prefabs/Loot/Orb Consume/DarkOrbConsume.prefab
+  uploadId: 689779

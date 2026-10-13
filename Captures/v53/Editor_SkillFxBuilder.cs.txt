@@ -1,0 +1,64 @@
+#if UNITY_EDITOR
+using UnityEditor;
+using UnityEngine;
+
+namespace Proto.EditorTools
+{
+    /// <summary>
+    /// 스킬 이펙트 그림 → 더하기 혼합 재질. 메뉴: Proto ▸ Build Skill FX
+    ///   원본  Assets/Texture/Effect/Fx*.png (검은 바탕에 흰 그림 — 검정이 투명, 색은 코드가 입힌다)
+    ///   재질  Assets/_Project/Resources/Fx/Skill/Mat_Fx*.mat (SkillFx가 Resources로 찾는다)
+    /// 그림을 바꾸면 같은 이름으로 덮어쓰고 이 메뉴를 한 번 더 누른다.
+    /// </summary>
+    public static class SkillFxBuilder
+    {
+        const string TexDir = "Assets/Texture/Effect/";
+        const string Dir = "Assets/_Project/Resources/Fx/Skill/";
+        static readonly string[] Names = { "FxThrustSpike", "FxThrustRing", "FxWhirlArc", "FxWindStreaks", "FxDustPuff", "FxCrescentWave" };
+
+        [MenuItem("Proto/Build Skill FX")]
+        public static void Build()
+        {
+            System.IO.Directory.CreateDirectory(Dir);
+            foreach (var n in Names) Mat(n);
+            AssetDatabase.SaveAssets();
+            Debug.Log("[Proto] 스킬 이펙트 재질 생성 완료");
+        }
+
+        static void Mat(string name)
+        {
+            string texPath = TexDir + name + ".png";
+            var imp = AssetImporter.GetAtPath(texPath) as TextureImporter;
+            if (imp == null) { Debug.LogWarning("[Proto] 스킬 이펙트 그림 없음: " + texPath); return; }
+            imp.textureType = TextureImporterType.Default;
+            imp.alphaSource = TextureImporterAlphaSource.FromGrayScale;
+            imp.alphaIsTransparency = true;
+            imp.wrapMode = TextureWrapMode.Clamp;
+            imp.mipmapEnabled = true;
+            imp.maxTextureSize = 512;
+            imp.SaveAndReimport();
+            var tex = AssetDatabase.LoadAssetAtPath<Texture2D>(texPath);
+
+            string path = Dir + "Mat_" + name + ".mat";
+            var m = AssetDatabase.LoadAssetAtPath<Material>(path);
+            if (m == null)
+            {
+                m = new Material(Shader.Find("Universal Render Pipeline/Particles/Unlit"));
+                AssetDatabase.CreateAsset(m, path);
+            }
+            m.SetTexture("_BaseMap", tex);
+            m.SetColor("_BaseColor", Color.white);
+            m.SetFloat("_Surface", 1f);
+            m.SetFloat("_Blend", 2f);   // Additive
+            m.SetFloat("_SrcBlend", (float)UnityEngine.Rendering.BlendMode.SrcAlpha);
+            m.SetFloat("_DstBlend", (float)UnityEngine.Rendering.BlendMode.One);
+            m.SetFloat("_ZWrite", 0f);
+            m.SetFloat("_Cull", 0f);
+            m.EnableKeyword("_SURFACE_TYPE_TRANSPARENT");
+            m.renderQueue = (int)UnityEngine.Rendering.RenderQueue.Transparent + 30;
+            m.SetOverrideTag("RenderType", "Transparent");
+            EditorUtility.SetDirty(m);
+        }
+    }
+}
+#endif

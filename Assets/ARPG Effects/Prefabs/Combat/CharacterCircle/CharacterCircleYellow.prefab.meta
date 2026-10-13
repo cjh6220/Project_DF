@@ -1,0 +1,14 @@
+fileFormatVersion: 2
+guid: 192fe42b654ad7144b59bf436410b8b6
+PrefabImporter:
+  externalObjects: {}
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 38222
+  packageName: Action RPG FX
+  packageVersion: 2.02
+  assetPath: Assets/ARPG Effects/Prefabs/Combat/CharacterCircle/CharacterCircleYellow.prefab
+  uploadId: 689779

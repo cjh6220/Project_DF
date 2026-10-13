@@ -1,0 +1,14 @@
+fileFormatVersion: 2
+guid: a1daf7073cf07e7468eb75e9d2d5e967
+PrefabImporter:
+  externalObjects: {}
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 38222
+  packageName: Action RPG FX
+  packageVersion: 2.02
+  assetPath: Assets/ARPG Effects/Prefabs/Combat/CharacterCircle/CharacterCirclePurple.prefab
+  uploadId: 689779

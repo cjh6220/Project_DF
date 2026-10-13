@@ -1,0 +1,15 @@
+fileFormatVersion: 2
+guid: 440d167d665405341839b8599dfd86ff
+timeCreated: 1432231208
+licenseType: Store
+NativeFormatImporter:
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 38222
+  packageName: Action RPG FX
+  packageVersion: 2.02
+  assetPath: Assets/ARPG Effects/Materials/Misc/dot.mat
+  uploadId: 689779

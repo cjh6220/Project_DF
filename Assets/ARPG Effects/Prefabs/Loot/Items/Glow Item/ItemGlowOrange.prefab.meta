@@ -1,0 +1,15 @@
+fileFormatVersion: 2
+guid: 4bdcdb045331c5a44b4376d4216c66fd
+timeCreated: 1432496652
+licenseType: Store
+NativeFormatImporter:
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 38222
+  packageName: Action RPG FX
+  packageVersion: 2.02
+  assetPath: Assets/ARPG Effects/Prefabs/Loot/Items/Glow Item/ItemGlowOrange.prefab
+  uploadId: 689779

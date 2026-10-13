@@ -1,0 +1,298 @@
+using System.Collections;
+using System.Collections.Generic;
+using UnityEngine;
+using UnityEngine.InputSystem;
+using Proto.Core;
+using Proto.Data;
+using Proto.Dungeon;
+using Proto.Enemy;
+using Proto.Player;
+
+namespace Proto.Dev
+{
+    /// <summary>
+    /// 스킬 테스트 씬 (Assets/Scenes/SkillTest.unity) — Main 씬 복사본에 이 오브젝트 하나가 더 붙어 있다.
+    /// Main이 바뀌면 메뉴 Proto ▸ Build Skill Test Scene 으로 다시 만든다.
+    ///
+    ///   세이브     읽지도 쓰지도 않는다 (SaveSystem.TestMode) — 본 게임 진행에 영향 없음
+    ///   시작       모든 스킬 Lv1로 배운 채 던전 첫 방에 바로 들어간다
+    ///   오른쪽 창  F1로 숨기기 · 보이기
+    ///              무적·피로도 무한 / 재사용 없음 / 허수아비 안 죽음 / 허수아비 가만히
+    ///              스킬마다 레벨 −/+ · 퀵슬롯 칸 바꾸기
+    ///              던전(몬스터 종류) · 접두사(강건한 = 슈퍼아머 등) · 마리 수 → 소환 / 보스 소환 / 모두 처치 / 제자리로
+    /// 개발용 도구라 마우스로 쓴다.
+    /// </summary>
+    public class SkillTestMode : MonoBehaviour
+    {
+        [SerializeField] DungeonDef[] dungeons;
+
+        public static bool Active { get; private set; }
+
+        RunManager _run;
+        RoomController _room;
+        PlayerController _pc;
+        Health _hp;
+
+        int _dungeon, _affix, _count = 3;
+        bool _infinite = true, _noCooldown = true, _immortal = true, _passive = true, _show = true;
+        readonly List<Health> _dummies = new();
+        Vector2 _scroll;
+        bool _ready;
+
+        static readonly Affix[] AffixList = (Affix[])System.Enum.GetValues(typeof(Affix));
+        static readonly string[] SlotNames = { "—", "A", "S", "D", "F" };
+
+        void Awake()
+        {
+            Active = true;
+            SaveSystem.TestMode = true;   // RunManager.Start(불러오기)보다 먼저
+        }
+
+        void OnDestroy()
+        {
+            Active = false;
+            SaveSystem.TestMode = false;
+            SkillCaster.CooldownScale = 1f;
+        }
+
+        IEnumerator Start()
+        {
+            yield return null;   // RunManager.Start — 마을 진입까지 끝난 뒤
+            _run = FindFirstObjectByType<RunManager>();
+            _room = FindFirstObjectByType<RoomController>();
+            _pc = FindFirstObjectByType<PlayerController>();
+            _hp = _pc != null ? _pc.GetComponent<Health>() : null;
+            if (_run == null || _room == null || _pc == null) { Debug.LogWarning("[SkillTest] 필요한 것을 못 찾음"); yield break; }
+
+            if (dungeons == null || dungeons.Length == 0)
+            {
+                var all = new List<DungeonDef>(Resources.FindObjectsOfTypeAll<DungeonDef>());
+                all.Sort((a, b) => a.danger.CompareTo(b.danger));
+                dungeons = all.ToArray();
+            }
+
+            // 모든 스킬 Lv1 · 퀵슬롯은 지금 것 그대로 (비어 있으면 앞에서부터)
+            var names = new List<string>(); var levels = new List<int>();
+            foreach (var d in SkillBook.All) { names.Add(d.Name); levels.Add(1); }
+            var slots = new List<string>();
+            for (int s = 0; s < SkillBook.SlotCount; s++) slots.Add(SkillBook.All[Mathf.Min(s, SkillBook.All.Length - 1)].Name);
+            _run.Skills.Import(names, levels, slots, 0);
+
+            EnterDungeon();
+            _ready = true;
+        }
+
+        void EnterDungeon()
+        {
+            _dummies.Clear();
+            var d = dungeons != null && dungeons.Length > 0 ? dungeons[Mathf.Clamp(_dungeon, 0, dungeons.Length - 1)] : null;
+            _run.StartRun(d);
+            StartCoroutine(SpawnLater());
+        }
+
+        IEnumerator SpawnLater()
+        {
+            yield return null;
+            Spawn();
+        }
+
+        // ───────────────────────────── 매 프레임 ─────────────────────────────
+
+        void Update()
+        {
+            if (Keyboard.current != null && Keyboard.current.f1Key.wasPressedThisFrame) _show = !_show;
+            if (!_ready) return;
+
+            SkillCaster.CooldownScale = _noCooldown ? 0f : 1f;
+
+            if (_infinite && _run.Phase == RunPhase.InDungeon)
+            {
+                if (_run.Stamina.Current < _run.Stamina.Max) _run.Stamina.Restore(_run.Stamina.Max);
+                if (_hp != null) { _hp.DamageTakenMul = 0f; if (_hp.Current < _hp.Max) _hp.Heal(_hp.Max); }
+            }
+
+            for (int i = _dummies.Count - 1; i >= 0; i--)
+            {
+                var h = _dummies[i];
+                if (h == null || h.IsDead) { _dummies.RemoveAt(i); continue; }
+                if (_immortal && h.Current < h.Max * 0.5f) h.Heal(h.Max);
+                var ec = h.GetComponent<EnemyController>();
+                if (ec != null) ec.Passive = _passive;
+            }
+        }
+
+        // ───────────────────────────── 몬스터 ─────────────────────────────
+
+        void Spawn()
+        {
+            if (_run.Phase != RunPhase.InDungeon) return;
+            var p = _pc.transform.position;
+            float side = _pc.FacingRight ? 1f : -1f;
+            for (int i = 0; i < _count; i++)
+            {
+                var at = p + new Vector3(side * (2.6f + 1.3f * (i / 2)), 0f, (i % 2 == 0 ? 0.4f : -0.4f) * (i == 0 ? 0f : 1f));
+                var ec = _room.SpawnForTest(_pc.transform, AffixList[_affix], at);
+                if (ec == null) continue;
+                var h = ec.GetComponent<Health>();
+                if (_immortal) h.Configure(100000f);
+                ec.Passive = _passive;
+                _dummies.Add(h);
+            }
+        }
+
+        void SpawnBoss()
+        {
+            if (_run.Phase != RunPhase.InDungeon) return;
+            var h = _room.SpawnBossForTest(_pc.transform);
+            if (h == null) return;
+            if (_immortal) h.Configure(1000000f);
+            _dummies.Add(h);
+        }
+
+        void KillAll()
+        {
+            var list = new List<Health>(_dummies);
+            _dummies.Clear();
+            foreach (var h in list) if (h != null && !h.IsDead) h.TakeDamage(h.Max * 10f, h.transform.position);
+        }
+
+        void Regroup()
+        {
+            var p = _pc.transform.position;
+            float side = _pc.FacingRight ? 1f : -1f;
+            int i = 0;
+            foreach (var h in _dummies)
+            {
+                if (h == null || h.IsDead) continue;
+                var at = p + new Vector3(side * (2.6f + 1.3f * (i / 2)), 0f, (i % 2 == 0 ? 0.4f : -0.4f) * (i == 0 ? 0f : 1f));
+                var cc = h.GetComponent<CharacterController>();
+                if (cc != null) cc.enabled = false;
+                h.transform.position = at;
+                if (cc != null) cc.enabled = true;
+                i++;
+            }
+        }
+
+        // ───────────────────────────── 창 ─────────────────────────────
+
+        GUIStyle _box, _label, _small, _btn, _title;
+        static Font _font;
+
+        void Styles()
+        {
+            if (_box != null) return;
+            if (_font == null && TMPro.TMP_Settings.defaultFontAsset != null) _font = TMPro.TMP_Settings.defaultFontAsset.sourceFontFile;
+            var bg = new Texture2D(1, 1); bg.SetPixel(0, 0, new Color(0.04f, 0.05f, 0.08f, 0.88f)); bg.Apply();
+            _box = new GUIStyle(GUI.skin.box) { normal = { background = bg }, padding = new RectOffset(12, 12, 10, 10) };
+            _label = new GUIStyle(GUI.skin.label) { fontSize = 15, normal = { textColor = Color.white } };
+            _small = new GUIStyle(_label) { fontSize = 13, normal = { textColor = new Color(0.68f, 0.66f, 0.76f) } };
+            _title = new GUIStyle(_label) { fontSize = 18, fontStyle = FontStyle.Bold, richText = true, normal = { textColor = new Color(1f, 0.83f, 0.42f) } };
+            _btn = new GUIStyle(GUI.skin.button) { fontSize = 14 };
+            if (_font != null) _box.font = _label.font = _small.font = _title.font = _btn.font = _font;
+        }
+
+        void OnGUI()
+        {
+            if (!_ready) return;
+            Styles();
+            float s = Screen.height / 1080f;
+            var old = GUI.matrix;
+            GUI.matrix = Matrix4x4.Scale(new Vector3(s, s, 1f));
+            float w = 400f, x = Screen.width / s - w - 16f, y = 230f;
+
+            if (!_show)
+            {
+                GUI.Label(new Rect(x + w - 150f, y, 150f, 24f), "F1 스킬 테스트", _small);
+                GUI.matrix = old;
+                return;
+            }
+
+            GUILayout.BeginArea(new Rect(x, y, w, Screen.height / s - y - 140f), _box);
+            GUILayout.Label("스킬 테스트   <size=12>F1 숨기기 · 세이브 안 함</size>", _title);
+
+            _infinite = GUILayout.Toggle(_infinite, " 무적 · 피로도 무한", _label);
+            _noCooldown = GUILayout.Toggle(_noCooldown, " 재사용 없음", _label);
+            _immortal = GUILayout.Toggle(_immortal, " 허수아비 안 죽음 (새로 소환할 때부터)", _label);
+            _passive = GUILayout.Toggle(_passive, " 허수아비 가만히 (공격 · 이동 안 함)", _label);
+            if (!_infinite && _hp != null && _hp.DamageTakenMul == 0f) _run.RecalcStats();
+
+            GUILayout.Space(8);
+            GUILayout.Label("스킬", _title);
+            _scroll = GUILayout.BeginScrollView(_scroll, GUILayout.Height(330f));
+            for (int i = 0; i < SkillBook.All.Length; i++)
+            {
+                var d = SkillBook.All[i];
+                int lv = _run.Skills.Level(i);
+                GUILayout.BeginHorizontal();
+                GUILayout.Label($"{d.Name}", _label, GUILayout.Width(110f));
+                GUILayout.Label(d.Cmd, _small, GUILayout.Width(56f));
+                if (GUILayout.Button("−", _btn, GUILayout.Width(28f))) SetLevel(i, lv - 1);
+                GUILayout.Label($"Lv {lv}", _label, GUILayout.Width(44f));
+                if (GUILayout.Button("+", _btn, GUILayout.Width(28f))) SetLevel(i, lv + 1);
+                int slot = -1;
+                for (int k = 0; k < SkillBook.SlotCount; k++) if (_run.Skills.Slot(k) == i) slot = k;
+                if (GUILayout.Button("칸 " + SlotNames[slot + 1], _btn, GUILayout.Width(62f))) CycleSlot(i, slot);
+                GUILayout.EndHorizontal();
+            }
+            GUILayout.EndScrollView();
+            GUILayout.BeginHorizontal();
+            if (GUILayout.Button("전부 Lv1", _btn)) for (int i = 0; i < SkillBook.All.Length; i++) SetLevel(i, 1);
+            if (GUILayout.Button("전부 Lv5 (마스터)", _btn)) for (int i = 0; i < SkillBook.All.Length; i++) SetLevel(i, SkillBook.All[i].MaxLevel);
+            GUILayout.EndHorizontal();
+
+            GUILayout.Space(8);
+            GUILayout.Label("몬스터", _title);
+            GUILayout.BeginHorizontal();
+            GUILayout.Label("던전", _label, GUILayout.Width(60f));
+            if (GUILayout.Button("<", _btn, GUILayout.Width(28f)) && dungeons.Length > 0) { _dungeon = (_dungeon + dungeons.Length - 1) % dungeons.Length; EnterDungeon(); }
+            GUILayout.Label(dungeons.Length > 0 && dungeons[_dungeon] != null ? dungeons[_dungeon].displayName : "-", _label, GUILayout.Width(150f));
+            if (GUILayout.Button(">", _btn, GUILayout.Width(28f)) && dungeons.Length > 0) { _dungeon = (_dungeon + 1) % dungeons.Length; EnterDungeon(); }
+            GUILayout.EndHorizontal();
+            GUILayout.BeginHorizontal();
+            GUILayout.Label("접두사", _label, GUILayout.Width(60f));
+            if (GUILayout.Button("<", _btn, GUILayout.Width(28f))) _affix = (_affix + AffixList.Length - 1) % AffixList.Length;
+            var a = AffixList[_affix];
+            GUILayout.Label(a == Affix.None ? "없음 (일반)" : Affixes.Get(a).Name + (a == Affix.Stalwart ? " · 슈퍼아머" : ""), _label, GUILayout.Width(150f));
+            if (GUILayout.Button(">", _btn, GUILayout.Width(28f))) _affix = (_affix + 1) % AffixList.Length;
+            GUILayout.EndHorizontal();
+            GUILayout.BeginHorizontal();
+            GUILayout.Label("마리 수", _label, GUILayout.Width(60f));
+            if (GUILayout.Button("<", _btn, GUILayout.Width(28f))) _count = Mathf.Max(1, _count - 1);
+            GUILayout.Label(_count.ToString(), _label, GUILayout.Width(150f));
+            if (GUILayout.Button(">", _btn, GUILayout.Width(28f))) _count = Mathf.Min(8, _count + 1);
+            GUILayout.EndHorizontal();
+            GUILayout.BeginHorizontal();
+            if (GUILayout.Button("소환", _btn)) Spawn();
+            if (GUILayout.Button("보스 소환", _btn)) SpawnBoss();
+            GUILayout.EndHorizontal();
+            GUILayout.BeginHorizontal();
+            if (GUILayout.Button("제자리로", _btn)) Regroup();
+            if (GUILayout.Button("모두 처치", _btn)) KillAll();
+            if (GUILayout.Button("방 새로", _btn)) EnterDungeon();
+            GUILayout.EndHorizontal();
+            GUILayout.Label($"허수아비 {_dummies.Count}마리 · 커맨드는 바라보는 쪽 기준", _small);
+            GUILayout.EndArea();
+            GUI.matrix = old;
+        }
+
+        void SetLevel(int i, int lv)
+        {
+            var d = SkillBook.All[i];
+            lv = Mathf.Clamp(lv, 1, d.MaxLevel);
+            var names = new List<string>(); var levels = new List<int>(); var slots = new List<string>();
+            for (int k = 0; k < SkillBook.All.Length; k++) { names.Add(SkillBook.All[k].Name); levels.Add(k == i ? lv : Mathf.Max(1, _run.Skills.Level(k))); }
+            for (int s = 0; s < SkillBook.SlotCount; s++) { int k = _run.Skills.Slot(s); slots.Add(k >= 0 ? SkillBook.All[k].Name : ""); }
+            // Import는 '더 높은 쪽'을 남기므로 내릴 때를 위해 먼저 전부 1로 되돌린 뒤 넣는다
+            _run.Skills.Import(null, null, slots, 0);
+            _run.Skills.Import(names, levels, slots, 0);
+        }
+
+        /// <summary>— → A → S → D → F → — 순서로 돈다. 이미 그 칸에 다른 스킬이 있으면 맞바꾼다.</summary>
+        void CycleSlot(int skill, int cur)
+        {
+            int next = cur + 1;
+            if (next >= SkillBook.SlotCount) { _run.Skills.Clear(cur); return; }
+            _run.Skills.Assign(next, skill);
+        }
+    }
+}

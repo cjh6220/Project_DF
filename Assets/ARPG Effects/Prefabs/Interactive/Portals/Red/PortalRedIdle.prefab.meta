@@ -1,0 +1,15 @@
+fileFormatVersion: 2
+guid: 27856c31c3afe6244a0f17a4fef0905a
+timeCreated: 1432237195
+licenseType: Store
+NativeFormatImporter:
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 38222
+  packageName: Action RPG FX
+  packageVersion: 2.02
+  assetPath: Assets/ARPG Effects/Prefabs/Interactive/Portals/Red/PortalRedIdle.prefab
+  uploadId: 689779

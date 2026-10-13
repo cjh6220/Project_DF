@@ -1,0 +1,14 @@
+fileFormatVersion: 2
+guid: d6041612abfc8cb4983459299b556838
+PrefabImporter:
+  externalObjects: {}
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 38222
+  packageName: Action RPG FX
+  packageVersion: 2.02
+  assetPath: Assets/ARPG Effects/Prefabs/Combat/CharacterCircle/CharacterCircleBlue.prefab
+  uploadId: 689779

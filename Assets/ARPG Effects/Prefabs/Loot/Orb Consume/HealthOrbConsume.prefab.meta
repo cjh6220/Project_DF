@@ -1,0 +1,14 @@
+fileFormatVersion: 2
+guid: 0a4bc2e019620cf4cbf17c2d374a6fb8
+PrefabImporter:
+  externalObjects: {}
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 38222
+  packageName: Action RPG FX
+  packageVersion: 2.02
+  assetPath: Assets/ARPG Effects/Prefabs/Loot/Orb Consume/HealthOrbConsume.prefab
+  uploadId: 689779

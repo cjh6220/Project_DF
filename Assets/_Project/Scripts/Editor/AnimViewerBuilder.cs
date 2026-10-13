@@ -1,0 +1,160 @@
+#if UNITY_EDITOR
+using System.Collections.Generic;
+using System.IO;
+using UnityEditor;
+using UnityEditor.Animations;
+using UnityEditor.SceneManagement;
+using UnityEngine;
+using UnityEngine.Rendering;
+using UnityEngine.SceneManagement;
+
+namespace Proto.EditorTools
+{
+    /// <summary>
+    /// 애니메이션 보기 씬 만들기. 메뉴: Proto ▸ Build Animation Viewer Scene → Assets/Scenes/AnimViewer.unity
+    ///   캐릭터   Main 씬 플레이어의 모델(Animator)을 그대로 복사해 온다 — 무기 · 옷까지 게임과 같다
+    ///   클립     맨 위 "사용 중" = Player.controller 상태들 (상태 이름 → 클립)
+    ///            그 아래 Assets/Animation 안의 휴머노이드 클립 전부, 폴더별
+    /// 새 애니메이션을 받아 넣었으면 이 메뉴를 다시 누른다.
+    /// </summary>
+    public static class AnimViewerBuilder
+    {
+        const string Main = "Assets/Scenes/Main.unity";
+        const string Dst = "Assets/Scenes/AnimViewer.unity";
+        const string Controller = "Assets/_Project/Animation/Player.controller";
+        const string ClipRoot = "Assets/Animation";
+
+        [MenuItem("Proto/Build Animation Viewer Scene")]
+        public static void Build()
+        {
+            if (EditorApplication.isPlaying) { Debug.LogWarning("[AnimViewer] 플레이 중에는 만들 수 없습니다"); return; }
+            if (!EditorSceneManager.SaveCurrentModifiedScenesIfUserWantsTo()) return;
+            string back = EditorSceneManager.GetActiveScene().path;
+
+            // 1) 클립 모으기
+            var clips = new List<AnimationClip>(); var groups = new List<string>(); var labels = new List<string>(); var paths = new List<string>();
+            var seen = new HashSet<AnimationClip>();
+            var ac = AssetDatabase.LoadAssetAtPath<AnimatorController>(Controller);
+            if (ac != null)
+                foreach (var layer in ac.layers)
+                    foreach (var st in layer.stateMachine.states)
+                    {
+                        var c = st.state.motion as AnimationClip;
+                        if (c == null) continue;
+                        clips.Add(c); groups.Add("★ 사용 중 (Player.controller)"); labels.Add($"{st.state.name}  ·  {c.name}"); paths.Add(AssetDatabase.GetAssetPath(c));
+                    }
+
+            var all = new List<(string group, string label, string path, AnimationClip clip)>();
+            foreach (var g in AssetDatabase.FindAssets("t:AnimationClip", new[] { ClipRoot }))
+            {
+                string p = AssetDatabase.GUIDToAssetPath(g);
+                foreach (var o in AssetDatabase.LoadAllAssetsAtPath(p))
+                {
+                    var c = o as AnimationClip;
+                    if (c == null || c.name.StartsWith("__preview__") || !c.humanMotion || !seen.Add(c)) continue;
+                    string dir = Path.GetDirectoryName(p).Replace('\\', '/');
+                    string rel = dir.Length > ClipRoot.Length ? dir.Substring(ClipRoot.Length + 1) : "(루트)";
+                    // 팩 이름이 길어 앞부분을 줄인다
+                    rel = rel.Replace("Grruzam Powerful Sword Animation(Great Sword, Katana) 1/Animation/", "Grruzam/");
+                    all.Add((rel, c.name, p, c));
+                }
+            }
+            all.Sort((a, b) => a.group != b.group ? string.CompareOrdinal(a.group, b.group) : string.CompareOrdinal(a.label, b.label));
+            foreach (var e in all) { clips.Add(e.clip); groups.Add(e.group); labels.Add(e.label); paths.Add(e.path); }
+
+            // 2) 플레이어 모델 복사 (Main에서)
+            var mainScene = EditorSceneManager.OpenScene(Main, OpenSceneMode.Single);
+            Animator src = null;
+            foreach (var root in mainScene.GetRootGameObjects())
+            {
+                var pc = root.GetComponentInChildren<Proto.Player.PlayerController>(true);
+                if (pc != null) { src = pc.GetComponentInChildren<Animator>(true); break; }
+            }
+            if (src == null) { Debug.LogWarning("[AnimViewer] Main에서 플레이어 모델을 못 찾음"); return; }
+
+            var scene = EditorSceneManager.NewScene(NewSceneSetup.DefaultGameObjects, NewSceneMode.Additive);
+            var model = Object.Instantiate(src.gameObject);
+            model.name = "Character";
+            SceneManager.MoveGameObjectToScene(model, scene);
+            model.transform.SetPositionAndRotation(Vector3.zero, Quaternion.Euler(0f, 90f, 0f));
+            model.transform.localScale = src.transform.lossyScale;
+            foreach (var mb in model.GetComponentsInChildren<MonoBehaviour>(true)) Object.DestroyImmediate(mb);
+            EditorSceneManager.CloseScene(mainScene, true);
+            SceneManager.SetActiveScene(scene);
+
+            // 3) 바닥 · 빛 · 카메라
+            var floor = GameObject.CreatePrimitive(PrimitiveType.Plane);
+            floor.name = "Floor";
+            floor.transform.localScale = new Vector3(3f, 1f, 3f);
+            var mat = new Material(Shader.Find("Universal Render Pipeline/Lit"));
+            mat.SetTexture("_BaseMap", Checker());
+            mat.SetTextureScale("_BaseMap", new Vector2(15f, 15f));
+            mat.SetFloat("_Smoothness", 0.1f);
+            Directory.CreateDirectory("Assets/_Project/Dev");
+            AssetDatabase.DeleteAsset("Assets/_Project/Dev/AnimViewerFloor.mat");
+            AssetDatabase.CreateAsset(mat, "Assets/_Project/Dev/AnimViewerFloor.mat");
+            floor.GetComponent<Renderer>().sharedMaterial = mat;
+
+            Camera cam = null; Light sun = null;
+            foreach (var root in scene.GetRootGameObjects())
+            {
+                if (cam == null) cam = root.GetComponent<Camera>();
+                if (sun == null) sun = root.GetComponent<Light>();
+            }
+            if (cam != null) { cam.clearFlags = CameraClearFlags.SolidColor; cam.backgroundColor = new Color(0.16f, 0.17f, 0.21f); cam.fieldOfView = 40f; }
+            if (sun != null) { sun.transform.rotation = Quaternion.Euler(45f, 150f, 0f); sun.shadows = LightShadows.Soft; sun.intensity = 1.2f; }
+            RenderSettings.ambientMode = AmbientMode.Flat;
+            RenderSettings.ambientLight = new Color(0.55f, 0.56f, 0.62f);
+
+            // 4) 보기 도구
+            var go = new GameObject("AnimViewer");
+            var v = go.AddComponent<Proto.Dev.AnimViewer>();
+            var so = new SerializedObject(v);
+            so.FindProperty("target").objectReferenceValue = model.GetComponent<Animator>();
+            so.FindProperty("cam").objectReferenceValue = cam;
+            Fill(so.FindProperty("clips"), clips);
+            Fill(so.FindProperty("groups"), groups);
+            Fill(so.FindProperty("labels"), labels);
+            Fill(so.FindProperty("paths"), paths);
+            so.ApplyModifiedPropertiesWithoutUndo();
+
+            EditorSceneManager.SaveScene(scene, Dst);
+            if (!string.IsNullOrEmpty(back) && back != Dst) EditorSceneManager.OpenScene(back, OpenSceneMode.Single);
+            Debug.Log($"[AnimViewer] {Dst} 생성 — 클립 {clips.Count}개. 이 씬을 열고 Play.");
+        }
+
+        static void Fill(SerializedProperty arr, List<AnimationClip> list)
+        {
+            arr.arraySize = list.Count;
+            for (int i = 0; i < list.Count; i++) arr.GetArrayElementAtIndex(i).objectReferenceValue = list[i];
+        }
+
+        static void Fill(SerializedProperty arr, List<string> list)
+        {
+            arr.arraySize = list.Count;
+            for (int i = 0; i < list.Count; i++) arr.GetArrayElementAtIndex(i).stringValue = list[i];
+        }
+
+        static Texture2D Checker()
+        {
+            const string path = "Assets/_Project/Dev/AnimViewerChecker.png";
+            if (!File.Exists(path))
+            {
+                var t = new Texture2D(64, 64);
+                for (int y = 0; y < 64; y++)
+                    for (int x = 0; x < 64; x++)
+                    {
+                        bool a = (x < 32) ^ (y < 32);
+                        bool line = x == 0 || y == 0;
+                        float v = line ? 0.62f : a ? 0.42f : 0.36f;
+                        t.SetPixel(x, y, new Color(v, v, v * 1.05f));
+                    }
+                Directory.CreateDirectory(Path.GetDirectoryName(path));
+                File.WriteAllBytes(path, t.EncodeToPNG());
+                AssetDatabase.ImportAsset(path);
+            }
+            return AssetDatabase.LoadAssetAtPath<Texture2D>(path);
+        }
+    }
+}
+#endif

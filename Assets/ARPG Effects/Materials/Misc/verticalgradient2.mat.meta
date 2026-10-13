@@ -1,0 +1,15 @@
+fileFormatVersion: 2
+guid: d97f6b98dffac7d49ad931dd11005667
+timeCreated: 1503016371
+licenseType: Store
+NativeFormatImporter:
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 38222
+  packageName: Action RPG FX
+  packageVersion: 2.02
+  assetPath: Assets/ARPG Effects/Materials/Misc/verticalgradient2.mat
+  uploadId: 689779

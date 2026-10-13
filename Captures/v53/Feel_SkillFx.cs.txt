@@ -1,0 +1,234 @@
+using System.Collections.Generic;
+using UnityEngine;
+
+namespace Proto.Feel
+{
+    /// <summary>
+    /// 스킬 전용 이펙트 — HitFx와 같은 방식(그림 한 장짜리 사각형, 더하기 혼합)으로 그린다.
+    ///
+    ///   찌르기   Thrust   칼끝에서 앞으로 쭉 뻗는 빛창 + 끝에서 터지는 고리 (연속 찌르기, 펜싱처럼)
+    ///   회전     Whirl    몸 둘레를 도는 궤적 두 겹 + 발밑 소용돌이 + 흙먼지 (회전베기, 휠윈드처럼)
+    ///   검기     Crescent 초승달 검기 한 장. 날아가는 동안 계속 찍어서 잔상이 남는다 (검기 날리기)
+    ///
+    /// 그림: Resources/Fx/Skill/Mat_FxThrustSpike · FxThrustRing · FxWhirlArc · FxWindStreaks · FxDustPuff · FxCrescentWave
+    /// (메뉴 Proto ▸ Build Skill FX — 원본은 Assets/Texture/Effect). 그림이 없으면 조용히 건너뛴다.
+    /// </summary>
+    public class SkillFx : MonoBehaviour
+    {
+        enum Kind { Spike, Ring, Arc, Swirl, Dust, Crescent }
+
+        class Fx
+        {
+            public Transform T; public Renderer R; public Kind Kind;
+            public float Age, Life, Size, Length, Angle, Spin, Height;
+            public Vector3 Pos, Dir; public Transform Follow;
+            public bool Flip; public Color Color; public float Fade = 1f;
+        }
+
+        static SkillFx _i;
+        readonly List<Fx> _live = new(), _pool = new();
+        readonly Dictionary<Kind, Material> _mat = new();
+        MaterialPropertyBlock _mpb;
+        Camera _cam;
+        static readonly int IdBase = Shader.PropertyToID("_BaseColor");
+
+        static SkillFx I
+        {
+            get
+            {
+                if (_i == null) _i = new GameObject("[SkillFx]").AddComponent<SkillFx>();
+                return _i;
+            }
+        }
+
+        void Awake()
+        {
+            _mpb = new MaterialPropertyBlock();
+            _mat[Kind.Spike] = Resources.Load<Material>("Fx/Skill/Mat_FxThrustSpike");
+            _mat[Kind.Ring] = Resources.Load<Material>("Fx/Skill/Mat_FxThrustRing");
+            _mat[Kind.Arc] = Resources.Load<Material>("Fx/Skill/Mat_FxWhirlArc");
+            _mat[Kind.Swirl] = Resources.Load<Material>("Fx/Skill/Mat_FxWindStreaks");
+            _mat[Kind.Dust] = Resources.Load<Material>("Fx/Skill/Mat_FxDustPuff");
+            _mat[Kind.Crescent] = Resources.Load<Material>("Fx/Skill/Mat_FxCrescentWave");
+        }
+
+        // ───────────────────────────── 부르기 ─────────────────────────────
+
+        /// <summary>찌르기 한 번 — from(칼끝 근처)에서 dir 쪽으로 length만큼 빛창이 뻗고 끝에서 고리가 터진다.</summary>
+        public static void Thrust(Vector3 from, Vector3 dir, float length)
+        {
+            var s = I.Spawn(Kind.Spike);
+            if (s != null)
+            {
+                s.Pos = from; s.Dir = dir.normalized; s.Length = length; s.Life = 0.16f;
+                s.Angle = Random.Range(-3f, 3f);
+                s.Color = new Color(1.6f, 2.0f, 2.6f);
+            }
+            var r = I.Spawn(Kind.Ring);
+            if (r != null)
+            {
+                r.Pos = from + dir.normalized * length * 0.92f; r.Size = 1.1f; r.Life = 0.18f;
+                r.Angle = Random.Range(0f, 60f); r.Spin = Random.Range(-90f, 90f);
+                r.Color = new Color(2.0f, 2.2f, 2.6f);
+            }
+        }
+
+        /// <summary>회전 — follow를 따라다니며 duration 동안 돈다. radius는 판정 반경.</summary>
+        public static void Whirl(Transform follow, float duration, float radius, bool clockwise)
+        {
+            float sgn = clockwise ? -1f : 1f;
+            // 몸 둘레 궤적 두 겹 (가슴 · 허리) — 바닥과 나란히 누워서 돈다
+            for (int k = 0; k < 2; k++)
+            {
+                var a = I.Spawn(Kind.Arc);
+                if (a == null) break;
+                a.Follow = follow; a.Life = duration; a.Height = k == 0 ? 1.15f : 0.55f;
+                a.Size = radius * (k == 0 ? 2.1f : 1.8f); a.Angle = k * 160f; a.Spin = sgn * (k == 0 ? 1100f : 900f);
+                a.Color = k == 0 ? new Color(1.5f, 1.8f, 2.4f) : new Color(1.1f, 1.3f, 1.8f);
+            }
+            var w = I.Spawn(Kind.Swirl);
+            if (w != null)
+            {
+                w.Follow = follow; w.Life = duration; w.Height = 0.06f;
+                w.Size = radius * 2.5f; w.Spin = sgn * 520f;
+                w.Color = new Color(0.9f, 1.0f, 1.2f);
+            }
+            I._dustFollow = follow; I._dustUntil = Time.time + duration; I._dustRadius = radius;
+        }
+
+        /// <summary>초승달 검기 한 장 — 볼록한 쪽이 날아가는 쪽. 잔상으로 여러 번 찍는다.</summary>
+        public static void Crescent(Vector3 center, bool right, float size, float life, float bright)
+        {
+            var c = I.Spawn(Kind.Crescent);
+            if (c == null) return;
+            c.Pos = center; c.Size = size; c.Life = life; c.Flip = !right;
+            c.Color = new Color(1.4f, 1.8f, 2.6f) * bright;
+        }
+
+        // ───────────────────────────── 속 ─────────────────────────────
+
+        Transform _dustFollow; float _dustUntil, _dustRadius, _dustNext;
+
+        Fx Spawn(Kind kind)
+        {
+            if (!_mat.TryGetValue(kind, out var mat) || mat == null) return null;
+            Fx f;
+            if (_pool.Count > 0) { f = _pool[_pool.Count - 1]; _pool.RemoveAt(_pool.Count - 1); }
+            else
+            {
+                var go = GameObject.CreatePrimitive(PrimitiveType.Quad);
+                go.name = "SkillFx";
+                Destroy(go.GetComponent<Collider>());
+                go.transform.SetParent(transform, false);
+                f = new Fx { T = go.transform, R = go.GetComponent<Renderer>() };
+                f.R.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+                f.R.receiveShadows = false;
+            }
+            f.Kind = kind; f.Age = 0f; f.Flip = false; f.Spin = 0f; f.Angle = 0f; f.Follow = null; f.Fade = 1f; f.Height = 0f;
+            f.R.sharedMaterial = mat;
+            f.T.gameObject.SetActive(true);
+            _live.Add(f);
+            return f;
+        }
+
+        void LateUpdate()
+        {
+            if (_cam == null) _cam = Camera.main;
+            if (_cam == null) return;
+            float dt = Mathf.Max(Time.deltaTime, Time.unscaledDeltaTime * 0.15f);   // 히트스톱 중에도 아주 조금씩
+
+            // 회전 중 흙먼지 — 발밑 둘레에서 피어올라 바깥으로 퍼진다
+            if (_dustFollow != null && Time.time < _dustUntil && (_dustNext -= dt) <= 0f)
+            {
+                _dustNext = 0.05f;
+                var d = Spawn(Kind.Dust);
+                if (d != null)
+                {
+                    float ang = Random.Range(0f, Mathf.PI * 2f);
+                    var off = new Vector3(Mathf.Cos(ang), 0f, Mathf.Sin(ang));
+                    d.Pos = _dustFollow.position + off * _dustRadius * Random.Range(0.55f, 0.9f) + Vector3.up * 0.15f;
+                    d.Dir = off; d.Size = Random.Range(0.6f, 1.0f); d.Life = Random.Range(0.45f, 0.65f);
+                    d.Angle = Random.Range(0f, 360f); d.Spin = Random.Range(-40f, 40f);
+                    d.Color = new Color(0.55f, 0.5f, 0.45f);
+                }
+            }
+
+            var camRot = _cam.transform.rotation;
+            for (int i = _live.Count - 1; i >= 0; i--)
+            {
+                var f = _live[i];
+                f.Age += dt;
+                float k = Mathf.Clamp01(f.Age / f.Life);
+                if (k >= 1f || (f.Follow == null && (f.Kind == Kind.Arc || f.Kind == Kind.Swirl)))
+                {
+                    f.T.gameObject.SetActive(false);
+                    _live.RemoveAt(i); _pool.Add(f);
+                    continue;
+                }
+                float a = 1f; Vector3 scale = Vector3.one;
+                switch (f.Kind)
+                {
+                    case Kind.Spike:
+                    {
+                        // 순식간에 뻗고 (0.05초) 가늘어지며 사라진다
+                        float grow = Mathf.Clamp01(f.Age / 0.05f);
+                        float len = f.Length * Mathf.Lerp(0.35f, 1f, 1f - (1f - grow) * (1f - grow));
+                        float thick = f.Length * Mathf.Lerp(1f, 0.35f, k);
+                        f.T.position = f.Pos + f.Dir * len * 0.5f;
+                        // 카메라를 보되, 그림의 가로축을 찌르는 방향에 맞춘다
+                        var fwd = _cam.transform.forward;
+                        var right = Vector3.ProjectOnPlane(f.Dir, fwd).normalized;
+                        var up = Vector3.Cross(fwd, right);
+                        f.T.rotation = Quaternion.LookRotation(fwd, up) * Quaternion.Euler(0f, 0f, f.Angle);
+                        scale = new Vector3(len, thick, 1f);
+                        a = 1f - k * k;
+                        break;
+                    }
+                    case Kind.Ring:
+                    {
+                        float s = f.Size * Mathf.Lerp(0.3f, 1.25f, 1f - (1f - k) * (1f - k));
+                        f.T.position = f.Pos;
+                        f.T.rotation = camRot * Quaternion.Euler(0f, 0f, f.Angle + f.Spin * f.Age);
+                        scale = new Vector3(s, s, 1f);
+                        a = 1f - k;
+                        break;
+                    }
+                    case Kind.Arc:
+                    case Kind.Swirl:
+                    {
+                        // 바닥과 나란히 누워 돈다. 처음 0.08초 켜지고 마지막 0.15초 꺼진다
+                        f.T.position = f.Follow.position + Vector3.up * f.Height;
+                        f.T.rotation = Quaternion.Euler(90f, f.Angle + f.Spin * f.Age, 0f);
+                        float s = f.Size * (f.Kind == Kind.Swirl ? Mathf.Lerp(0.85f, 1.1f, k) : 1f);
+                        scale = new Vector3(s, s, 1f);
+                        a = Mathf.Clamp01(f.Age / 0.08f) * Mathf.Clamp01((f.Life - f.Age) / 0.15f);
+                        if (f.Kind == Kind.Arc) a *= 0.85f + 0.15f * Mathf.Sin(f.Age * 40f);
+                        break;
+                    }
+                    case Kind.Dust:
+                    {
+                        f.T.position = f.Pos + f.Dir * (k * 0.9f) + Vector3.up * (k * 0.5f);
+                        f.T.rotation = camRot * Quaternion.Euler(0f, 0f, f.Angle + f.Spin * f.Age);
+                        float s = f.Size * Mathf.Lerp(0.6f, 1.6f, k);
+                        scale = new Vector3(s, s, 1f);
+                        a = Mathf.Sin(k * Mathf.PI) * 0.8f;
+                        break;
+                    }
+                    case Kind.Crescent:
+                    {
+                        f.T.position = f.Pos;
+                        f.T.rotation = camRot;
+                        float s = f.Size * Mathf.Lerp(1f, 1.12f, k);
+                        scale = new Vector3(f.Flip ? -s : s, s, 1f);
+                        a = 1f - k;
+                        break;
+                    }
+                }
+                f.T.localScale = scale;
+                var c = f.Color; c.a = a;
+                _mpb.SetColor(IdBase, c * new Color(a, a, a, 1f));
+                f.R.SetPropertyBlock(_mpb);
+            }
+        }
+    }
+}

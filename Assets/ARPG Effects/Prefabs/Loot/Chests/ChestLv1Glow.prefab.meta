@@ -1,0 +1,14 @@
+fileFormatVersion: 2
+guid: bc51a0999ed6bca4bb752db2eb30149d
+PrefabImporter:
+  externalObjects: {}
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 38222
+  packageName: Action RPG FX
+  packageVersion: 2.02
+  assetPath: Assets/ARPG Effects/Prefabs/Loot/Chests/ChestLv1Glow.prefab
+  uploadId: 689779

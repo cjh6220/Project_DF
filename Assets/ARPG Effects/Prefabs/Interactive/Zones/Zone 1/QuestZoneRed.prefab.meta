@@ -1,0 +1,15 @@
+fileFormatVersion: 2
+guid: c6032280fb9eba04392874025050a4d3
+timeCreated: 1503161555
+licenseType: Store
+NativeFormatImporter:
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 38222
+  packageName: Action RPG FX
+  packageVersion: 2.02
+  assetPath: Assets/ARPG Effects/Prefabs/Interactive/Zones/Zone 1/QuestZoneRed.prefab
+  uploadId: 689779

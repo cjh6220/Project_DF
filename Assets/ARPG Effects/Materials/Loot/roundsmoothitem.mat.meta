@@ -1,0 +1,15 @@
+fileFormatVersion: 2
+guid: fd3f9ae7003e0e84c8d582469ca1ea9a
+timeCreated: 1503015817
+licenseType: Store
+NativeFormatImporter:
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 38222
+  packageName: Action RPG FX
+  packageVersion: 2.02
+  assetPath: Assets/ARPG Effects/Materials/Loot/roundsmoothitem.mat
+  uploadId: 689779

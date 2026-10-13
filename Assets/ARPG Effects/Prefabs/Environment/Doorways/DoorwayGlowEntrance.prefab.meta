@@ -1,0 +1,15 @@
+fileFormatVersion: 2
+guid: b350c8e5688fa584bbdd22d09dcec70d
+timeCreated: 1432646361
+licenseType: Store
+NativeFormatImporter:
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 38222
+  packageName: Action RPG FX
+  packageVersion: 2.02
+  assetPath: Assets/ARPG Effects/Prefabs/Environment/Doorways/DoorwayGlowEntrance.prefab
+  uploadId: 689779

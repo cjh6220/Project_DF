@@ -1,0 +1,15 @@
+fileFormatVersion: 2
+guid: b09744e2d3affad498680aa36747f7db
+timeCreated: 1432231795
+licenseType: Store
+NativeFormatImporter:
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 38222
+  packageName: Action RPG FX
+  packageVersion: 2.02
+  assetPath: Assets/ARPG Effects/Materials/Orbs/DropletOpaque.mat
+  uploadId: 689779

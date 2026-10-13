@@ -1,0 +1,15 @@
+fileFormatVersion: 2
+guid: 822b4b1090f14474497fa924f336420c
+timeCreated: 1502805982
+licenseType: Store
+NativeFormatImporter:
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 38222
+  packageName: Action RPG FX
+  packageVersion: 2.02
+  assetPath: Assets/ARPG Effects/Prefabs/Interactive/Actions/ClickMoveCircle.prefab
+  uploadId: 689779

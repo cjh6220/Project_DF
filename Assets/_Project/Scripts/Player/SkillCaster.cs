@@ -52,10 +52,11 @@ namespace Proto.Player
 
         static readonly Spec[] Specs =
         {
-            // 돌진베기 → Z — 3.5m 돌진하며 벤다
-            new Spec { Name = "돌진베기", State = "Skill_Dash", Speed = 1.15f, End = 0.80f, Cooldown = 4f,
-                       MoveFrom = 0.0f, MoveTo = 0.34f, MoveDist = 3.5f, MoveDistPerLevel = 0.5f,
-                       Hits = new[] { new Hit { At = 0.30f, Mul = 2.0f, Reach = 2.6f, Knock = 1.2f, Stun = 0.4f } } },
+            // 돌진베기 → Z — 낮게 땅을 차고 3.5m 들어가며 벤다 (카타나 Skill_A)
+            new Spec { Name = "돌진베기", State = "Skill_Dash", Speed = 1.15f, End = 0.85f, Cooldown = 4f,
+                       MoveFrom = 0.0f, MoveTo = 0.60f, MoveDist = 3.5f, MoveDistPerLevel = 0.5f,
+                       Hits = new[] { new Hit { At = 0.27f, Mul = 1.2f, Reach = 2.6f, Knock = 0.4f, Stun = 0.4f },
+                                      new Hit { At = 0.56f, Mul = 1.0f, Reach = 2.6f, Knock = 1.2f, Stun = 0.4f } } },
             // 올려베기 Z — 띄운다 (기본 스킬)
             new Spec { Name = "올려베기", State = "Skill_Upper", Speed = 1.2f, End = 0.95f, Cooldown = 5f,
                        Hits = new[] { new Hit { At = 0.35f, Mul = 1.8f, Reach = 2.3f, Knock = 0.3f, Stun = 0.5f, Lift = 11f } } },
@@ -91,14 +92,24 @@ namespace Proto.Player
             new Spec { Name = "발도술", State = "Skill_Iaido", Speed = 1.3f, End = 1.40f, Cooldown = 10f,
                        MoveFrom = 0.52f, MoveTo = 0.68f, MoveDist = 1.6f,
                        Hits = new[] { new Hit { At = 0.64f, Mul = 4.5f, Reach = 4.2f, Depth = 0.9f, Knock = 1.4f, Stun = 0.6f, Heavy = true } } },
-            // 반격 자세 ← X — 자세를 잡고 있다가 맞으면 막고 되받아친다
+            // 반격 자세 ↓↑ X — 자세를 잡고 있다가 맞으면 막고 되받아친다
             new Spec { Name = "반격 자세", State = "Skill_GuardStart", Kind = Kind.Counter, Cooldown = 6f,
                        Hits = new[] { new Hit { At = 0.38f, Mul = 3.0f, Reach = 2.8f, Depth = 1.3f, Knock = 1.5f, Stun = 0.7f, Heavy = true } } },
-            // 전투 함성 ↑↓ Z — 칼을 하늘로 들며 공격력 버프
-            new Spec { Name = "전투 함성", State = "Skill_WarCry", Kind = Kind.WarCry, Offset = 0.95f, End = 1.65f, Cooldown = 25f },
-            // 질주 ←← X — 잠깐 빨라진다 (모션 없음)
-            new Spec { Name = "질주", Kind = Kind.Sprint, Cooldown = 15f },
-            // 대지 가르기 ↓→↑ Z — 높이 뛰어올라 땅을 내려친다 (궁극기)
+            // 질풍참 →→ Z — 3.4m 치고 들어가며 세 번 벤다 (카타나 Skill_C)
+            new Spec { Name = "질풍참", State = "Skill_Gale", Speed = 1.2f, End = 1.25f, Cooldown = 7f,
+                       MoveFrom = 0.0f, MoveTo = 0.47f, MoveDist = 3.4f,
+                       Hits = new[] {
+                           new Hit { At = 0.10f, Mul = 0.8f, Reach = 2.4f, Knock = 0.3f, Stun = 0.35f },
+                           new Hit { At = 0.58f, Mul = 0.9f, Reach = 2.5f, Knock = 0.3f, Stun = 0.35f },
+                           new Hit { At = 1.00f, Mul = 1.4f, Reach = 2.6f, Knock = 1.2f, Stun = 0.45f, Heavy = true } } },
+            // 낙화참 →↑ Z — 뛰어올라 돌며 두 번, 내려오며 크게 한 번 (카타나 Skill_G)
+            new Spec { Name = "낙화참", State = "Skill_Fall", Speed = 1.15f, End = 1.40f, Cooldown = 9f,
+                       MoveFrom = 0.0f, MoveTo = 1.10f, MoveDist = 3.0f,
+                       Hits = new[] {
+                           new Hit { At = 0.30f, Mul = 0.7f, Reach = 2.4f, Knock = 0.2f, Stun = 0.4f },
+                           new Hit { At = 0.48f, Mul = 0.7f, Reach = 2.4f, Knock = 0.2f, Stun = 0.4f },
+                           new Hit { At = 1.07f, Mul = 2.6f, Shape = Shape.Around, Reach = 3.0f, Knock = 1.0f, Stun = 0.8f, Heavy = true } } },
+            // 대지 가르기 ↑↓ Z — 높이 뛰어올라 땅을 내려친다 (궁극기)
             new Spec { Name = "대지 가르기", State = "Skill_Ultimate", Speed = 1.15f, End = 1.45f, Cooldown = 40f, DamagePerLevel = 0.2f,
                        MoveFrom = 0.2f, MoveTo = 0.9f, MoveDist = 2.5f,
                        Hits = new[] { new Hit { At = 0.95f, Mul = 7.0f, Shape = Shape.Around, Reach = 4.5f, Knock = 1.6f, Stun = 1.0f, Lift = 6f, Heavy = true } } },
@@ -269,6 +280,9 @@ namespace Proto.Player
             return Mathf.Max(1f, s.Cooldown + s.CooldownPerLevel * (lv - 1));
         }
 
+        /// <summary>재사용 시간 배율 — 스킬 테스트 씬에서 0 (재사용 없음).</summary>
+        public static float CooldownScale = 1f;
+
         Spec SpecOf(int book)
         {
             foreach (var s in Specs) if (s.Book == book) return s;
@@ -281,7 +295,7 @@ namespace Proto.Player
             if (_cdLeft[s.Book] > 0f) return false;   // 재사용 중 — X 커맨드면 평타가 대신 나간다
 
             _curLevel = Run.Skills.Level(s.Book);
-            float cd = Mathf.Max(1f, s.Cooldown + s.CooldownPerLevel * (_curLevel - 1));
+            float cd = Mathf.Max(1f, s.Cooldown + s.CooldownPerLevel * (_curLevel - 1)) * CooldownScale;
             _cdLeft[s.Book] = cd;
             int slot = SlotOf(s.Book);
             if (slot >= 0 && Proto.UI.SkillBarView.Instance != null) Proto.UI.SkillBarView.Instance.Use(slot, cd);
@@ -305,6 +319,8 @@ namespace Proto.Player
             _pc.BeginSkill();
             Play(s.State, s.Offset);
             if (feel != null) feel.SwingSfx();
+            // 회전베기 — 몸 둘레를 도는 궤적 · 발밑 소용돌이 · 흙먼지 (휠윈드)
+            if (s.Name == "회전베기") Proto.Feel.SkillFx.Whirl(transform, (s.End - s.Offset) / Mathf.Max(0.1f, s.Speed), 2.6f, !_pc.FacingRight);
             return true;
         }
 
@@ -398,6 +414,8 @@ namespace Proto.Player
                     Proto.Feel.HitFx.Slash(o + Vector3.right * 1.1f + Vector3.up * 0.9f, true, _nextHit % 2, h.Reach * 1.2f);
                     Proto.Feel.HitFx.Slash(o + Vector3.left * 1.1f + Vector3.up * 0.9f, false, (_nextHit + 1) % 2, h.Reach * 1.2f);
                 }
+                else if (s.Name == "연속 찌르기")   // 펜싱처럼 — 칼끝에서 앞으로 빛창이 쭉 뻗는다
+                    Proto.Feel.SkillFx.Thrust(o + fwd * 0.5f + Vector3.up * (1.05f + UnityEngine.Random.Range(-0.15f, 0.15f)), fwd, h.Reach + 0.4f);
                 else Proto.Feel.HitFx.Slash(swing, _pc.FacingRight, h.Heavy ? 2 : _nextHit % 2, h.Heavy ? 4f : 3.2f);
                 if (h.Heavy) Proto.Feel.HitFx.Impact(o + fwd * (h.Shape == Shape.Around ? 0f : 1.4f) + Vector3.up * 0.2f, true);
             }
@@ -488,11 +506,11 @@ namespace Proto.Player
 
         class SwordWave : MonoBehaviour
         {
-            SkillCaster _owner; Spec _s; Hit _h; Vector3 _dir; bool _right; float _life, _fx;
+            SkillCaster _owner; Spec _s; Hit _h; Vector3 _dir; bool _right; float _life, _fx; GameObject _trail;
             readonly HashSet<Health> _once = new();
 
             public void Init(SkillCaster owner, Spec s, Hit h, Vector3 dir, bool right, float life)
-            { _owner = owner; _s = s; _h = new Hit { At = h.At, Mul = h.Mul, Reach = 1.2f, Depth = h.Depth, Knock = h.Knock, Stun = h.Stun }; _dir = dir; _right = right; _life = life; }
+            { _owner = owner; _s = s; _h = new Hit { At = h.At, Mul = h.Mul, Reach = 1.2f, Depth = h.Depth, Knock = h.Knock, Stun = h.Stun }; _dir = dir; _right = right; _life = life; _trail = Proto.Feel.SkillFx.WaveTrail(transform, right); }   // 초승달 검기 파티클
 
             void Update()
             {
@@ -500,9 +518,8 @@ namespace Proto.Player
                 transform.position += _dir * WaveSpeed * dt;
                 _life -= dt;
                 _fx -= dt;
-                if (_fx <= 0f) { _fx = 0.045f; Proto.Feel.HitFx.Slash(transform.position + Vector3.up * 0.9f, _right, 2, 2.6f); }
                 if (_owner != null) _owner.WaveStrike(_s, _h, transform.position - _dir * 0.6f, _once);
-                if (_life <= 0f) Destroy(gameObject);
+                if (_life <= 0f) { Proto.Feel.SkillFx.Release(_trail); Destroy(gameObject); }
             }
         }
 

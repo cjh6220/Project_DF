@@ -1,0 +1,15 @@
+fileFormatVersion: 2
+guid: b163ba20185001c4b967030ba1bb914a
+timeCreated: 1432135150
+licenseType: Store
+NativeFormatImporter:
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 38222
+  packageName: Action RPG FX
+  packageVersion: 2.02
+  assetPath: Assets/ARPG Effects/Prefabs/Loot/Gold/GoldSmall.prefab
+  uploadId: 689779

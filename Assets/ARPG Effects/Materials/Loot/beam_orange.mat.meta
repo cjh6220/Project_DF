@@ -1,0 +1,15 @@
+fileFormatVersion: 2
+guid: 54f97d9f897b175418e5fd72bd188368
+timeCreated: 1431955000
+licenseType: Store
+NativeFormatImporter:
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 38222
+  packageName: Action RPG FX
+  packageVersion: 2.02
+  assetPath: Assets/ARPG Effects/Materials/Loot/beam_orange.mat
+  uploadId: 689779

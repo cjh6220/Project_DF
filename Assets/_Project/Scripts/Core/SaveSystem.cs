@@ -55,11 +55,14 @@ namespace Proto.Core
         /// <summary>초기화 중에는 저장하지 않는다 — 씬이 내려가며 종료 저장이 지운 파일을 되살리면 안 된다.</summary>
         public static bool Suspended { get; private set; }
 
+        /// <summary>스킬 테스트 씬 — 세이브를 읽지도 쓰지도 않는다.</summary>
+        public static bool TestMode;
+
         /// <summary>게임 시작 때 RunManager가 부른다. 세이브가 있으면 넣고, 자동 저장 담당을 붙인다.</summary>
         public static void LoadInto(RunManager run, Proto.Town.VillageController village)
         {
             Suspended = false;
-            var data = Read();
+            var data = TestMode ? null : Read();
             if (data != null) Apply(data, run, village);
 
             var agent = run.GetComponent<SaveAgent>();
@@ -105,7 +108,7 @@ namespace Proto.Core
 
         public static void Save(RunManager run, Proto.Town.VillageController village)
         {
-            if (Suspended || run == null) return;
+            if (Suspended || TestMode || run == null) return;
             var d = new SaveData { savedAt = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss") };
 
             // 던전 안에서 저장하면(게임 종료) 이번 판 획득물도 창고에 더한 값으로 쓴다

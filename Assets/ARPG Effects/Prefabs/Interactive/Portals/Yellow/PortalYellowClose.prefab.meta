@@ -1,0 +1,15 @@
+fileFormatVersion: 2
+guid: 5a475346633453a4eab9cac634ce5aa4
+timeCreated: 1432999713
+licenseType: Store
+NativeFormatImporter:
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 38222
+  packageName: Action RPG FX
+  packageVersion: 2.02
+  assetPath: Assets/ARPG Effects/Prefabs/Interactive/Portals/Yellow/PortalYellowClose.prefab
+  uploadId: 689779
